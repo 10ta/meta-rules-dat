@@ -19,13 +19,13 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	./sing-box rule-set compile ./geosite/${list[i]}.json -o ./geosite/${list[i]}.srs
 done
 
-# mkdir -p mixed
-# for file in $(find geoip -type f | grep -v srs | awk -F "/" '{print $NF}'); do
-# 	if [ -n "$(find geosite -type f -iname "$file")" ]; then
-# 		file=$(find ./geosite -type f -iname "$file" | awk -F"/" '{print $NF}' | sed 's/\.json//g')
-# 		head -n -3 ./geoip/${file}.json >./mixed/${file}.json
-# 		sed -i 's/]/],/g' ./mixed/${file}.json
-# 		tail -n +5 ./geosite/${file}.json >>./mixed/${file}.json
-# 		./sing-box rule-set compile ./mixed/${file}.json -o ./mixed/${file}.srs
-# 	fi
-# done
+mkdir -p mixed
+for file in $(find geoip -type f | grep -v srs | awk -F "/" '{print $NF}'); do
+	if [ -n "$(find geosite -type f -iname "$file")" ]; then
+		file=$(find ./geosite -type f -iname "$file" | awk -F"/" '{print $NF}' | sed 's/\.json//g')
+		head -n -3 ./geoip/${file}.json >./mixed/${file}.json
+		sed -i 's/]/],/g' ./mixed/${file}.json
+		tail -n +5 ./geosite/${file}.json >>./mixed/${file}.json
+		./sing-box rule-set compile ./mixed/${file}.json -o ./mixed/${file}.srs
+	fi
+done

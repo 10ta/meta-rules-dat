@@ -15,6 +15,7 @@ jobs:
       - name: Set variables
         run: |
           echo "GOAMD64=v3" >> $GITHUB_ENV
+          echo "SB_VERSION=1.8.9" >> $GITHUB_ENV
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
           echo "CHINA_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/ChinaMax/ChinaMax_Domain.txt" >> $GITHUB_ENV
           echo "GOOGLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/google.china.conf" >> $GITHUB_ENV
@@ -225,7 +226,7 @@ jobs:
           mkdir -p ./sing-rule/geo
           cp ./geoip.dat ./geosite.db ./resouces/convert.sh ./sing-rule/geo/ 
           cd ./sing-rule/geo
-          wget https://github.com/SagerNet/sing-box/releases/download/v1.8.0-alpha.1/sing-box-1.8.0-alpha.1-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-1.8.0-alpha.1-linux-amd64/sing-box ./ && rm -r sing-box-1.8.0-alpha.1-linux-amd64
+          wget https://github.com/SagerNet/sing-box/releases/download/v${{ env.SB_VERSION }}/sing-box-${{ env.SB_VERSION }}-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-${{ env.SB_VERSION }}-linux-amd64/sing-box ./ && rm -r sing-box-${{ env.SB_VERSION }}-linux-amd64
           wget https://github.com/IrineSistiana/mosdns/releases/download/v4.5.3/mosdns-linux-amd64.zip -O mosdns.zip && unzip mosdns.zip
           chmod 755 mosdns sing-box convert.sh && ./convert.sh
           rm mosdns* sing-box* convert.sh geoip.dat geosite.db LICENSE README.md config.yaml
@@ -238,7 +239,7 @@ jobs:
           mkdir -p ./sing-rule/geo-lite
           cp ./geoip-lite.dat ./sing-rule/geo-lite/geoip.dat && cp ./geosite-lite.db ./sing-rule/geo-lite/geosite.db && cp ./resouces/convert.sh ./sing-rule/geo-lite/ 
           cd ./sing-rule/geo-lite
-          wget https://github.com/SagerNet/sing-box/releases/download/v1.8.0-alpha.1/sing-box-1.8.0-alpha.1-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-1.8.0-alpha.1-linux-amd64/sing-box ./ && rm -r sing-box-1.8.0-alpha.1-linux-amd64
+          wget https://github.com/SagerNet/sing-box/releases/download/v${{ env.SB_VERSION }}/sing-box-${{ env.SB_VERSION }}-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-${{ env.SB_VERSION }}-linux-amd64/sing-box ./ && rm -r sing-box-${{ env.SB_VERSION }}-linux-amd64
           wget https://github.com/IrineSistiana/mosdns/releases/download/v4.5.3/mosdns-linux-amd64.zip -O mosdns.zip && unzip mosdns.zip
           chmod 755 mosdns sing-box convert.sh && ./convert.sh
           rm mosdns* sing-box* convert.sh geoip.dat geosite.db LICENSE README.md config.yaml
@@ -265,17 +266,18 @@ jobs:
           chmod 755 mosdns convert-clash.sh && ./convert-clash.sh
           rm mosdns* convert-clash.sh geoip.dat geosite.dat LICENSE README.md config.yaml
 
-      # - name: Convert bm7-rule-set to sing-rule-set
-      #   env:
-      #     NO_SKIP: true
-      #   run: |
-      #     mkdir -p ./sing-rule/bm7
-      #     cp ./resouces/bm7.sh ./sing-rule/bm7/
-      #     cd ./sing-rule/bm7
-      #     wget https://github.com/SagerNet/sing-box/releases/download/v1.8.0-alpha.1/sing-box-1.8.0-alpha.1-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-1.8.0-alpha.1-linux-amd64/sing-box ./ && rm -r sing-box-1.8.0-alpha.1-linux-amd64
-      #     ls
-      #     chmod 755 bm7.sh && ./bm7.sh
-      #     rm -r bm7.sh sing-box* rule
+      - name: Convert bm7-rule-set to sing-rule-set
+        env:
+          NO_SKIP: true
+        run: |
+          mkdir -p ./sing-rule/bm7
+          # cp ./resouces/bm7.sh ./sing-rule/bm7/
+          cd ./sing-rule/bm7
+          wget https://raw.githubusercontent.com/10ta/meta-rules-dat/master/resouces/bm7.sh
+          wget https://github.com/SagerNet/sing-box/releases/download/v${{ env.SB_VERSION }}/sing-box-${{ env.SB_VERSION }}-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-${{ env.SB_VERSION }}-linux-amd64/sing-box ./ && rm -r sing-box-${{ env.SB_VERSION }}-linux-amd64
+          ls
+          chmod 755 bm7.sh && ./bm7.sh
+          rm -r bm7.sh sing-box* rule
 
       - name: Move and zip files
         run: |
