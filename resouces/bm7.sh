@@ -178,7 +178,7 @@ echo "------ 合并文件 Start------"
 	if [ "$(ls ${list[i]})" = "" ]; then
 		echo "${list[i]}void"
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-	elif [ -f "${list[i]}.json" ]; then
+	elif [ -f "${list[i]}-DNS-only.json" ]; then
 		echo "${list[i]}exists"
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
