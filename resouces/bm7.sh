@@ -129,60 +129,60 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
 	fi
 	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}.json
-	# rm -r ${list[i]}
+	rm -r ${list[i]}
 	./sing-box rule-set compile ${list[i]}.json -o ${list[i]}.srs
 done
 
 
-# 处理文件
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	# mkdir -p ${list[i]}
-	# # 归类
-	# # domain
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-	# 	# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
-	# fi
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
-	# fi
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
-	# fi
-	# 转成json格式
-	# android package
-	# domain
-	if [ -f "${list[i]}/domain.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/domain.json
-		sed -i 's/$/",/g' ${list[i]}/domain.json
-		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
-	fi
-	if [ -f "${list[i]}/suffix.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/suffix.json
-		sed -i 's/$/",/g' ${list[i]}/suffix.json
-		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
-	fi
-	if [ -f "${list[i]}/keyword.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/keyword.json
-		sed -i 's/$/",/g' ${list[i]}/keyword.json
-		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
-	fi
-	# 合并文件
-	if [ "$(ls ${list[i]})" = "" ]; then
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-	elif [ -f "${list[i]}.json" ]; then
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
-		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
-	else
-		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-	fi
-	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-DNS-only.json
-	rm -r ${list[i]}
-	./sing-box rule-set compile ${list[i]}-DNS-only.json -o ${list[i]}-DNS-only.srs
-done
+# # 处理文件
+# list=($(ls ./rule/Clash/))
+# for ((i = 0; i < ${#list[@]}; i++)); do
+# 	mkdir -p ${list[i]}
+# 	# 归类
+# 	# domain
+# 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
+# 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+# 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,/./g' > ${list[i]}/suffix.json
+# 	fi
+# 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
+# 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
+# 	fi
+# 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
+# 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
+# 	fi
+# 	# 转成json格式
+# 	# android package
+# 	# domain
+# 	if [ -f "${list[i]}/domain.json" ]; then
+# 		sed -i 's/^/        "/g' ${list[i]}/domain.json
+# 		sed -i 's/$/",/g' ${list[i]}/domain.json
+# 		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
+# 		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
+# 	fi
+# 	if [ -f "${list[i]}/suffix.json" ]; then
+# 		sed -i 's/^/        "/g' ${list[i]}/suffix.json
+# 		sed -i 's/$/",/g' ${list[i]}/suffix.json
+# 		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
+# 		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
+# 	fi
+# 	if [ -f "${list[i]}/keyword.json" ]; then
+# 		sed -i 's/^/        "/g' ${list[i]}/keyword.json
+# 		sed -i 's/$/",/g' ${list[i]}/keyword.json
+# 		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
+# 		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
+# 	fi
+# 	# 合并文件
+# 	if [ "$(ls ${list[i]})" = "" ]; then
+# 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
+# 	elif [ -f "${list[i]}.json" ]; then
+# 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
+# 		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
+# 		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
+# 	else
+# 		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
+# 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
+# 	fi
+# 	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-DNS-only.json
+# 	rm -r ${list[i]}
+# 	./sing-box rule-set compile ${list[i]}-DNS-only.json -o ${list[i]}-DNS-only.srs
+# done
