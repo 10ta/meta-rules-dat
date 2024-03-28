@@ -141,8 +141,8 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	# 归类
 	# domain
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,/./g' > ${list[i]}/suffix.json
+		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
 	fi
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
@@ -174,7 +174,7 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	# 合并文件
 	if [ "$(ls ${list[i]})" = "" ]; then
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-	elif [ -f "${list[i]}-DNS-only.json" ]; then
+	elif [ -f "${list[i]}.json" ]; then
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
 		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
