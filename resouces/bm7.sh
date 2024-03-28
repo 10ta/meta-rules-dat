@@ -150,6 +150,8 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
 	fi
+
+echo "------ 转成json格式 Start ------"
 	# 转成json格式
 	# android package
 	# domain
@@ -171,7 +173,8 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
 		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
 	fi
-	# 合并文件
+
+echo "------ 合并文件 Start------"
 	if [ "$(ls ${list[i]})" = "" ]; then
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 	elif [ -f "${list[i]}.json" ]; then
