@@ -176,15 +176,19 @@ echo "------ 转成json格式 Start ------"
 
 echo "------ 合并文件 Start------"
 	if [ "$(ls ${list[i]})" = "" ]; then
+		echo "${list[i]}void"
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 	elif [ -f "${list[i]}.json" ]; then
+		echo "${list[i]}exists"
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
 		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
 	else
+		echo "${list[i]}final"
 		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
 		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
 	fi
+	echo "final merge"
 	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-DNS-only.json
 	rm -r ${list[i]}
 	./sing-box rule-set compile ${list[i]}-DNS-only.json -o ${list[i]}-DNS-only.srs
