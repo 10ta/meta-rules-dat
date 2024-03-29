@@ -52,8 +52,8 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	# fi
 	# domain
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,/./g' > ${list[i]}/suffix.json
+		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
 	fi
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
@@ -141,8 +141,8 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	# 归类
 	# domain
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,/./g' > ${list[i]}/suffix.json
+		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
 	fi
 	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
 		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
@@ -177,19 +177,19 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 # echo "------ 合并文件 Start------"
 	if [ "$(ls ${list[i]})" = "" ]; then
 		# echo "${list[i]}: void"
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-	elif [ -f "${list[i]}-DNS-only.json" ]; then
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
+	elif [ -f "${list[i]}-Resolve.json" ]; then
 		# echo "${list[i]}": "exists"
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
-		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-DNS-only.json
-		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
+		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-Resolve.json
+		cat ${list[i]}/* >> ${list[i]}-Resolve.json
 	else
 		# echo "${list[i]}: final"
-		cat ${list[i]}/* >> ${list[i]}-DNS-only.json
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-DNS-only.json
+		cat ${list[i]}/* >> ${list[i]}-Resolve.json
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
 	fi
 	# echo "final merge"
-	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-DNS-only.json
+	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-Resolve.json
 	rm -r ${list[i]}
-	./sing-box rule-set compile ${list[i]}-DNS-only.json -o ${list[i]}-DNS-only.srs
+	./sing-box rule-set compile ${list[i]}-Resolve.json -o ${list[i]}-Resolve.srs
 done
