@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "domain_suffix": [
+        "dns.alidns.com",
+        "doh.360.cn",
+        "doh.pub"
+      ]
+    }
+  ]
+}
