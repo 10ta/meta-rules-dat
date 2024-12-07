@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "x315.com",
+      "domain_suffix": ".x315.com"
+    }
+  ]
+}

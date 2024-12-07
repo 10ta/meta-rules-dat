@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "nixos.org",
+      "domain_suffix": ".nixos.org"
+    }
+  ]
+}

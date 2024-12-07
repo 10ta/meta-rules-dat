@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": [
+        "kkmh.com",
+        "kuaikanmanhua.com"
+      ],
+      "domain_suffix": [
+        ".kkmh.com",
+        ".kuaikanmanhua.com"
+      ]
+    }
+  ]
+}
