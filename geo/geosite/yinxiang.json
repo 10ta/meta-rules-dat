@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "yinxiang.com",
+      "domain_suffix": ".yinxiang.com"
+    }
+  ]
+}

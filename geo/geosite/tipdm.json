@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "tipdim.org",
+      "domain_suffix": ".tipdim.org"
+    }
+  ]
+}

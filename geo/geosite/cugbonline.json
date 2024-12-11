@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "cugbonline.cn",
+      "domain_suffix": ".cugbonline.cn"
+    }
+  ]
+}
