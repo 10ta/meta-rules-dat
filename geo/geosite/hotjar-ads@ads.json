@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "static.hotjar.com",
+      "domain_suffix": ".static.hotjar.com"
+    }
+  ]
+}

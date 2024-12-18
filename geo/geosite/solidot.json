@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "solidot.org",
+      "domain_suffix": ".solidot.org"
+    }
+  ]
+}
