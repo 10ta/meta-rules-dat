@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "ssp.api.tappx.com",
+      "domain_suffix": ".ssp.api.tappx.com"
+    }
+  ]
+}

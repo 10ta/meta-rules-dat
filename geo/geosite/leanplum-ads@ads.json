@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "leanplum.com",
+      "domain_suffix": ".leanplum.com"
+    }
+  ]
+}

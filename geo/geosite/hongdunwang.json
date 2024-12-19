@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "hongdunwang.com.cn",
+      "domain_suffix": ".hongdunwang.com.cn"
+    }
+  ]
+}
