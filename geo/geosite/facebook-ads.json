@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": [
+        "analytics.facebook.com",
+        "pixel.facebook.com"
+      ],
+      "domain_suffix": [
+        ".analytics.facebook.com",
+        ".pixel.facebook.com"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "onesignal.com",
+      "domain_suffix": ".onesignal.com"
+    }
+  ]
+}
