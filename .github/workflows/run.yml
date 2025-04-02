@@ -207,17 +207,17 @@ jobs:
       #     wget -O geoip-lite.dat https://github.com/xishang0128/geoip/raw/release/geoip.dat
       #     wget https://github.com/Loyalsoldier/geoip/raw/release/geoip.dat
 
-      - name: Build db and metadb file
-        env:
-          NO_SKIP: true
-        run: |
-          go install -trimpath -ldflags="-s -w -buildid=" github.com/metacubex/geo/cmd/geo@master
-          geo convert site -i v2ray -o sing -f geosite.db ./custom/publish/geosite.dat
-          geo convert site -i v2ray -o sing -f geosite-lite.db ./community/geosite-lite.dat
-          geo convert ip -i v2ray -o sing -f geoip.db ./geoip.dat
-          geo convert ip -i v2ray -o meta -f geoip.metadb ./geoip.dat
-          geo convert ip -i v2ray -o sing -f geoip-lite.db ./geoip-lite.dat
-          geo convert ip -i v2ray -o meta -f geoip-lite.metadb ./geoip-lite.dat
+      # - name: Build db and metadb file
+      #   env:
+      #     NO_SKIP: true
+      #   run: |
+      #     go install -trimpath -ldflags="-s -w -buildid=" github.com/metacubex/geo/cmd/geo@master
+      #     geo convert site -i v2ray -o sing -f geosite.db ./custom/publish/geosite.dat
+      #     geo convert site -i v2ray -o sing -f geosite-lite.db ./community/geosite-lite.dat
+      #     geo convert ip -i v2ray -o sing -f geoip.db ./geoip.dat
+      #     geo convert ip -i v2ray -o meta -f geoip.metadb ./geoip.dat
+      #     geo convert ip -i v2ray -o sing -f geoip-lite.db ./geoip-lite.dat
+      #     geo convert ip -i v2ray -o meta -f geoip-lite.metadb ./geoip-lite.dat
 
       - name: Convert geo to sing-rule-set
         env:
