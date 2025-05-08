@@ -44,6 +44,12 @@ jobs:
           repository: v2fly/domain-list-community
           path: community
 
+      - name: Checkout MetaCubeX/meta-rules-converter
+        uses: actions/checkout@v4
+        with:
+          repository: MetaCubeX/meta-rules-converter
+          path: convert
+
       - name: Checkout cokebar/gfwlist2dnsmasq
         uses: actions/checkout@v4
         with:
@@ -260,6 +266,15 @@ jobs:
         env:
           NO_SKIP: true
         run: |
+          mkdir -p meta-rule/asn && mkdir -p sing-rule/asn
+          cd convert
+          wget https://raw.githubusercontent.com/xishang0128/geoip/release/GeoLite2-ASN.mmdb
+          go run ./ asn -o ../meta-rule/asn
+          go run ./ asn -o ../sing-rule/asn -t sing-box
+      - name: Convert bm7-rule-set to sing-rule-set
+        env:
+          NO_SKIP: true
+        run: |
           mkdir -p ./sing-rule/bm7
           # cp ./resouces/bm7.sh ./sing-rule/bm7/
           cd ./sing-rule/bm7
@@ -298,6 +313,7 @@ jobs:
           sha256sum geoip-lite.db > geoip-lite.db.sha256sum
           sha256sum geoip.metadb > geoip.metadb.sha256sum
           sha256sum geoip-lite.metadb > geoip-lite.metadb.sha256sum
+          sha256sum GeoLite2-ASN.mmdb > GeoLite2-ASN.mmdb.sha256sum
 
       - name: Delete current release assets
         uses: andreaswilli/delete-release-assets-action@v3.0.0
