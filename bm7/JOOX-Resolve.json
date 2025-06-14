@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "domain_keyword": [
+        "jooxweb-api"
+      ],
+      "domain_suffix": [
+        "i-joox.com",
+        "joox.com",
+        "sanook.com"
+      ]
+    }
+  ]
+}
