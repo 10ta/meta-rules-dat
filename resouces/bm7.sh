@@ -53,8 +53,22 @@ if [ ! -d accademia_tmp ]; then
 fi
 
 # 覆盖到 rule/Clash（防止 Classical 回魂）
-rsync -a --delete accademia_tmp/ ./rule/Clash/
-rm -rf accademia_tmp
+list=($(find ./rule/Clash/ | awk -F '/' '{print $5}' | sed '/^$/d' | grep -v '\.' | sort -u))
+for ((i = 0; i < ${#list[@]}; i++)); do
+	paths=($(find ./rule/Clash/ -mindepth 2 -type d -name "${list[i]}"))
+	for p in "${paths[@]}"; do
+		target="./rule/Clash/${list[i]}"
+		# 如果目标不存在，直接 mv
+		if [ ! -d "$target" ]; then
+			mv "$p" "$target"
+		# 目标存在 → 合并目录
+		elif [ "$p" != "$target" ]; then
+			rsync -a "$p"/ "$target"/
+			rm -rf "$p"
+		fi
+	done
+done
+
 
 # =======================
 # 处理文件 → JSON → SRS
