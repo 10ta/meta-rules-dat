@@ -1,5 +1,8 @@
+#!/bin/bash
+
 # 1. 拉取 Blackmatrix (基础库)
 if [ ! -d rule ]; then
+    echo "[INFO] Initializing Blackmatrix repository..."
     mkdir -p rule/Clash
     git init
     git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
@@ -9,46 +12,56 @@ if [ ! -d rule ]; then
     rm -rf .git
 fi
 
-# 2. 移动 Blackmatrix 文件/目录到同一文件夹 (保持原逻辑)
-list=($(find ./rule/Clash/ | awk -F '/' '{print $5}' | sed '/^$/d' | grep -v '\.' | sort -u))
-for ((i = 0; i < ${#list[@]}; i++)); do
-    path=$(find ./rule/Clash/ -name ${list[i]})
-    mv $path ./rule/Clash/
-done
-
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-    if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
-        directory=($(ls ./rule/Clash/${list[i]}))
-        for ((x = 0; x < ${#directory[@]}; x++)); do
-            mv ./rule/Clash/${list[i]}/${directory[x]} ./rule/Clash/${directory[x]}
-        done
-        rm -r ./rule/Clash/${list[i]}
-    fi
+# 2. 规范化 Blackmatrix 目录结构 (解决 "Directory not empty" 报错)
+echo "[INFO] Normalizing directory structure..."
+# 找到所有包含 .yaml 的深度目录，并尝试将其移动到 Clash 根目录下
+find ./rule/Clash -mindepth 2 -type d -exec cp -rf {}/. ./rule/Clash/ \; 2>/dev/null
+# 清理空目录和多余层级，只保留 Clash/规则名/规则.yaml 这种结构
+find ./rule/Clash -mindepth 1 -maxdepth 1 -type d | while read dir; do
+    # 如果目录下还有子目录，把子目录里的 yaml 提到当前目录下
+    find "$dir" -mindepth 2 -name "*.yaml" -exec mv -f {} "$dir/" \; 2>/dev/null
 done
 
 # 3. 【关键步骤】先统一重命名 Blackmatrix 的 Classical 文件
+echo "[INFO] Renaming Classical files to standard name..."
 list=($(ls ./rule/Clash/))
 for ((i = 0; i < ${#list[@]}; i++)); do
-    if [ -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" ]; then
-        mv ./rule/Clash/${list[i]}/${list[i]}_Classical.yaml ./rule/Clash/${list[i]}/${list[i]}.yaml
+    target_dir="./rule/Clash/${list[i]}"
+    if [ -d "$target_dir" ]; then
+        if [ -f "$target_dir/${list[i]}_Classical.yaml" ]; then
+            mv -f "$target_dir/${list[i]}_Classical.yaml" "$target_dir/${list[i]}.yaml"
+            echo "  - Processed: ${list[i]}_Classical -> ${list[i]}.yaml"
+        fi
     fi
 done
 
-# 4. 【高优先级】拉取 Accademia 并覆盖
-# 使用临时目录拉取，避免污染当前根目录
+# 4. 【高优先级】拉取 Accademia 并覆盖，打印详细 Log
+echo "[INFO] Fetching Accademia rules for override..."
 mkdir -p acca_temp
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git ./acca_temp
 
-# 遍历 Accademia 的目录，强制覆盖 rule/Clash 下的对应文件
-# 因为 Accademia 结构是 ./foo/foo.yaml，直接 cp -R 会覆盖同名文件夹下的同名文件
-cp -Rf ./acca_temp/* ./rule/Clash/
+echo "[INFO] Merging Accademia rules into Blackmatrix..."
+# 遍历 Accademia 下的所有文件夹
+ls ./acca_temp | while read rule_name; do
+    if [ -d "./acca_temp/$rule_name" ]; then
+        if [ -d "./rule/Clash/$rule_name" ]; then
+            echo "  - [OVERWRITE] $rule_name (Accademia version taking priority)"
+        else
+            echo "  - [MERGE NEW] $rule_name (Accademia specific rule)"
+            mkdir -p "./rule/Clash/$rule_name"
+        fi
+        # 强制覆盖：-f 保证不提示，-v 显示过程
+        cp -Rf ./acca_temp/"$rule_name"/* ./rule/Clash/"$rule_name"/
+    fi
+done
 rm -rf ./acca_temp
+echo "[INFO] Merge complete."
 
-
-
-# 处理文件
+# --- 以下部分完全衔接你的原始脚本逻辑，确保 ${list[i]} 变量定义正确 ---
+echo "[INFO] Starting core processing (JSON conversion & Sing-box compilation)..."
 list=($(ls ./rule/Clash/))
+
+# 这里开始接你原来的 for ((i = 0; i < ${#list[@]}; i++)); do ... 逻辑
 for ((i = 0; i < ${#list[@]}; i++)); do
 	mkdir -p ${list[i]}
 	# 归类
