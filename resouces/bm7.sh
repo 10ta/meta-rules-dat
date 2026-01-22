@@ -1,131 +1,208 @@
-#!/bin/bash
-set -euo pipefail
-
-echo "========== STAGE 1: Fetch blackmatrix =========="
-
+# 1. 拉取 Blackmatrix (基础库)
 if [ ! -d rule ]; then
-	git init
-	git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
-	git config core.sparsecheckout true
-	echo "rule/Clash" >> .git/info/sparse-checkout
-	git pull --depth 1 origin master
-	rm -rf .git
+    mkdir -p rule/Clash
+    git init
+    git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
+    git config core.sparsecheckout true
+    echo "rule/Clash" >>.git/info/sparse-checkout
+    git pull --depth 1 origin master
+    rm -rf .git
 fi
 
-echo "========== STAGE 2: Flatten rule/Clash =========="
-
-mapfile -t NAMES < <(
-	find ./rule/Clash -mindepth 2 -type d \
-	| awk -F '/' '{print $5}' \
-	| sed '/^$/d' \
-	| sort -u
-)
-
-for name in "${NAMES[@]}"; do
-	echo "[FLATTEN] $name"
-
-	mapfile -t PATHS < <(
-		find ./rule/Clash -mindepth 2 -type d -name "$name"
-	)
-
-	for src in "${PATHS[@]}"; do
-		dst="./rule/Clash/$name"
-
-		if [ "$src" = "$dst" ]; then
-			continue
-		fi
-
-		if [ ! -d "$dst" ]; then
-			echo "  mv   $src -> $dst"
-			mv "$src" "$dst"
-		else
-			echo "  merge $src -> $dst"
-			rsync -a "$src"/ "$dst"/
-			rm -rf "$src"
-		fi
-	done
+# 2. 移动 Blackmatrix 文件/目录到同一文件夹 (保持原逻辑)
+list=($(find ./rule/Clash/ | awk -F '/' '{print $5}' | sed '/^$/d' | grep -v '\.' | sort -u))
+for ((i = 0; i < ${#list[@]}; i++)); do
+    path=$(find ./rule/Clash/ -name ${list[i]})
+    mv $path ./rule/Clash/
 done
 
-echo "========== STAGE 3: Cleanup empty dirs =========="
+list=($(ls ./rule/Clash/))
+for ((i = 0; i < ${#list[@]}; i++)); do
+    if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
+        directory=($(ls ./rule/Clash/${list[i]}))
+        for ((x = 0; x < ${#directory[@]}; x++)); do
+            mv ./rule/Clash/${list[i]}/${directory[x]} ./rule/Clash/${directory[x]}
+        done
+        rm -r ./rule/Clash/${list[i]}
+    fi
+done
 
-find ./rule/Clash -type d -empty -delete
+# 3. 【关键步骤】先统一重命名 Blackmatrix 的 Classical 文件
+list=($(ls ./rule/Clash/))
+for ((i = 0; i < ${#list[@]}; i++)); do
+    if [ -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" ]; then
+        mv ./rule/Clash/${list[i]}/${list[i]}_Classical.yaml ./rule/Clash/${list[i]}/${list[i]}.yaml
+    fi
+done
 
-echo "========== STAGE 4: Handle Classical =========="
+# 4. 【高优先级】拉取 Accademia 并覆盖
+# 使用临时目录拉取，避免污染当前根目录
+mkdir -p acca_temp
+git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git ./acca_temp
 
-mapfile -t RULES < <(find ./rule/Clash -mindepth 1 -maxdepth 1 -type d -printf "%f\n")
+# 遍历 Accademia 的目录，强制覆盖 rule/Clash 下的对应文件
+# 因为 Accademia 结构是 ./foo/foo.yaml，直接 cp -R 会覆盖同名文件夹下的同名文件
+cp -Rf ./acca_temp/* ./rule/Clash/
+rm -rf ./acca_temp
 
-for r in "${RULES[@]}"; do
-	c="./rule/Clash/$r/${r}_Classical.yaml"
-	n="./rule/Clash/$r/${r}.yaml"
-	if [ -f "$c" ]; then
-		echo "[CLASSICAL] $r"
-		mv "$c" "$n"
+
+
+# 处理文件
+list=($(ls ./rule/Clash/))
+for ((i = 0; i < ${#list[@]}; i++)); do
+	mkdir -p ${list[i]}
+	# 归类
+	# # android package
+	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS | grep -v '\.exe' | grep -v '/' | grep '\.')" ]; then
+	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' |  grep PROCESS | grep -v '\.exe' | grep -v '/' | grep '\.' | sed 's/  - PROCESS-NAME,//g' > ${list[i]}/package.json
+	# fi
+	# # process name
+	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS | grep -v '/' | grep -v '\.')" ]; then
+	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep -v '#' | grep PROCESS | grep -v '/' | grep -v '\.' | sed 's/  - PROCESS-NAME,//g' > ${list[i]}/process.json
+	# fi
+	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS |  grep '\.exe')" ]; then
+	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep -v '#' | grep PROCESS |  grep '\.exe' | sed 's/  - PROCESS-NAME,//g' >> ${list[i]}/process.json
+	# fi
+	# domain
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
+		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
 	fi
-done
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
+	fi
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
+	fi
+	# ipcidr
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- IP-CIDR')" ]; then
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- IP-CIDR' | sed 's/  - IP-CIDR,//g' | sed 's/  - IP-CIDR6,//g' > ${list[i]}/ipcidr.json
+	fi
+	# 转成json格式
+	# # android package
+	# if [ -f "${list[i]}/package.json" ]; then
+	# 	sed -i 's/^/        "/g' ${list[i]}/package.json
+	# 	sed -i 's/$/",/g' ${list[i]}/package.json
+	# 	sed -i '1s/^/      "package_name": [\n/g' ${list[i]}/package.json
+	# 	sed -i '$ s/,$/\n      ],/g' ${list[i]}/package.json
+	# fi
+	# # process name
+	# if [ -f "${list[i]}/process.json" ]; then
+	# 	sed -i 's/^/        "/g' ${list[i]}/process.json
+	# 	sed -i 's/$/",/g' ${list[i]}/process.json
+	# 	sed -i '1s/^/      "process_name": [\n/g' ${list[i]}/process.json
+	# 	sed -i '$ s/,$/\n      ],/g' ${list[i]}/process.json
+	# fi
+	# domain
+	if [ -f "${list[i]}/domain.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/domain.json
+		sed -i 's/$/",/g' ${list[i]}/domain.json
+		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
+	fi
+	if [ -f "${list[i]}/suffix.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/suffix.json
+		sed -i 's/$/",/g' ${list[i]}/suffix.json
+		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
+	fi
+	if [ -f "${list[i]}/keyword.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/keyword.json
+		sed -i 's/$/",/g' ${list[i]}/keyword.json
+		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
+	fi
+	# ipcidr
+	if [ -f "${list[i]}/ipcidr.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/ipcidr.json
+		sed -i 's/$/",/g' ${list[i]}/ipcidr.json
+		sed -i '1s/^/      "ip_cidr": [\n/g' ${list[i]}/ipcidr.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/ipcidr.json
+	fi
+	# 合并文件
+	# if [ -f "${list[i]}/package.json" -a -f "${list[i]}/process.json" ]; then
+	# 	mv ${list[i]}/package.json ${list[i]}.json
+	# 	sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}.json
+	# 	cat ${list[i]}/process.json >> ${list[i]}.json
+	# 	rm ${list[i]}/process.json
+	# elif [ -f "${list[i]}/package.json" ]; then
+	# 	mv ${list[i]}/package.json ${list[i]}.json
+	# elif [ -f "${list[i]}/process.json" ]; then
+	# 	mv ${list[i]}/process.json ${list[i]}.json
+	# fi
 
-echo "========== STAGE 5: Fetch Accademia =========="
-
-git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git accademia_tmp
-rm -rf accademia_tmp/.git
-
-echo "========== STAGE 6: Accademia override =========="
-
-rsync -a --delete accademia_tmp/ ./rule/Clash/
-rm -rf accademia_tmp
-
-echo "========== STAGE 7: Compile rule-sets =========="
-
-mapfile -t RULES < <(
-	find ./rule/Clash -maxdepth 1 \
-		\( -type d -o -type f \) \
-		-printf "%f\n" \
-	| sed 's/\.yaml$//' \
-	| sort -u
-)
-
-for r in "${RULES[@]}"; do
-	echo "[COMPILE] $r"
-
-	work="./_work_$r"
-	mkdir "$work"
-
-	yaml=""
-	if [ -f "./rule/Clash/$r/$r.yaml" ]; then
-		yaml="./rule/Clash/$r/$r.yaml"
-	elif [ -f "./rule/Clash/$r.yaml" ]; then
-		yaml="./rule/Clash/$r.yaml"
+	if [ "$(ls ${list[i]})" = "" ]; then
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
+	elif [ -f "${list[i]}.json" ]; then
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
+		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}.json
+		cat ${list[i]}/* >> ${list[i]}.json
 	else
-		echo "  skip (no yaml found)"
-		rm -rf "$work"
-		continue
+		cat ${list[i]}/* >> ${list[i]}.json
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
 	fi
-
-	echo "  use yaml: $yaml"
-
-	grep -v '#' "$yaml" | grep 'DOMAIN-SUFFIX,' | sed 's/.*,//' > "$work/suffix" || true
-	grep -v '#' "$yaml" | grep 'DOMAIN-KEYWORD,' | sed 's/.*,//' > "$work/keyword" || true
-	grep -v '#' "$yaml" | grep 'DOMAIN,' | sed 's/.*,//' > "$work/domain" || true
-	grep -v '#' "$yaml" | grep 'IP-CIDR' | sed 's/.*,//' > "$work/ipcidr" || true
-
-	json="$r.json"
-	echo '{ "version": 1, "rules": [ {' > "$json"
-
-	for f in domain suffix keyword ipcidr; do
-		if [ -s "$work/$f" ]; then
-			echo "  \"$f\": [" >> "$json"
-			sed 's/^/    "/; s/$/",/' "$work/$f" >> "$json"
-			sed -i '$ s/,$//' "$json"
-			echo "  ]," >> "$json"
-		fi
-	done
-
-	sed -i '$ s/,$//' "$json"
-	echo "} ] }" >> "$json"
-
-	rm -rf "$work"
-
-	./sing-box rule-set compile "$json" -o "$r.srs"
+	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}.json
+	rm -r ${list[i]}
+	./sing-box rule-set compile ${list[i]}.json -o ${list[i]}.srs
 done
 
-echo "========== ALL DONE =========="
+echo "------ DNS-only Start ------"
+# 处理文件
+list=($(ls ./rule/Clash/))
+for ((i = 0; i < ${#list[@]}; i++)); do
+	mkdir -p ${list[i]}
+	# 归类
+	# domain
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
+		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
+	fi
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
+	fi
+	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
+		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
+	fi
 
+# echo "------ 转成json格式 Start ------"
+	# 转成json格式
+	# android package
+	# domain
+	if [ -f "${list[i]}/domain.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/domain.json
+		sed -i 's/$/",/g' ${list[i]}/domain.json
+		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
+	fi
+	if [ -f "${list[i]}/suffix.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/suffix.json
+		sed -i 's/$/",/g' ${list[i]}/suffix.json
+		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
+	fi
+	if [ -f "${list[i]}/keyword.json" ]; then
+		sed -i 's/^/        "/g' ${list[i]}/keyword.json
+		sed -i 's/$/",/g' ${list[i]}/keyword.json
+		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
+		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
+	fi
+
+# echo "------ 合并文件 Start------"
+	if [ "$(ls ${list[i]})" = "" ]; then
+		# echo "${list[i]}: void"
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
+	elif [ -f "${list[i]}-Resolve.json" ]; then
+		# echo "${list[i]}": "exists"
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
+		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-Resolve.json
+		cat ${list[i]}/* >> ${list[i]}-Resolve.json
+	else
+		# echo "${list[i]}: final"
+		cat ${list[i]}/* >> ${list[i]}-Resolve.json
+		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
+	fi
+	# echo "final merge"
+	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-Resolve.json
+	rm -r ${list[i]}
+	./sing-box rule-set compile ${list[i]}-Resolve.json -o ${list[i]}-Resolve.srs
+done
