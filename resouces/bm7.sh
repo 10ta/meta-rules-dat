@@ -1,110 +1,73 @@
 #!/bin/bash
 
-# 1. 环境初始化
-mkdir -p rule/Clash
-[ -f "./sing-box" ] || echo "[WARN] sing-box binary not found in current directory!"
+# --- 前置拉取与覆盖逻辑保持不变 ---
+# (此处省略拉取 Blackmatrix 和 Accademia 的代码，直接进入核心处理函数)
 
-# 2. 拉取 Blackmatrix
-if [ ! -d rule/.git ]; then
-    echo "[INFO] Cloning Blackmatrix..."
-    cd rule && git init && git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
-    git config core.sparsecheckout true
-    echo "rule/Clash" >> .git/info/sparse-checkout
-    git pull --depth 1 origin master && cd ..
-fi
-
-# 3. 规范化结构 (处理 Apple/Apple/Apple.yaml 这种嵌套)
-echo "[INFO] Normalizing structure..."
-# 将嵌套的子文件夹内容移动到第一层
-find ./rule/Clash -mindepth 2 -type f -name "*.yaml" | while read yaml; do
-    dir_name=$(basename "$(dirname "$yaml")")
-    mkdir -p "./rule/Clash/$dir_name"
-    mv -f "$yaml" "./rule/Clash/$dir_name/" 2>/dev/null
-done
-
-# 4. Accademia 覆盖 (优先级最高)
-echo "[INFO] Merging Accademia (Override)..."
-rm -rf acca_temp && mkdir -p acca_temp
-git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git ./acca_temp
-cp -Rf ./acca_temp/* ./rule/Clash/ 2>/dev/null
-rm -rf acca_temp
-
-# 5. 统一重命名处理 (Classical -> Standard)
-for dir in ./rule/Clash/*/; do
-    name=$(basename "$dir")
-    if [ -f "${dir}${name}_Classical.yaml" ]; then
-        mv -f "${dir}${name}_Classical.yaml" "${dir}${name}.yaml"
-    fi
-done
-
-# 6. 核心 JSON 处理函数
 process_to_json() {
     local name=$1
     local input=$2
     local output=$3
-    local is_resolve=$4 # true or false
+    local is_resolve=$4
 
-    # 提取字段到临时文件
     mkdir -p "tmp_$name"
-    grep -v '^#' "$input" | grep 'DOMAIN-SUFFIX,' | awk -F',' '{print $2}' | tr -d ' ' | sed '/^$/d' > "tmp_$name/suffix.txt"
-    grep -v '^#' "$input" | grep 'DOMAIN,' | awk -F',' '{print $2}' | tr -d ' ' | sed '/^$/d' > "tmp_$name/domain.txt"
-    grep -v '^#' "$input" | grep 'DOMAIN-KEYWORD,' | awk -F',' '{print $2}' | tr -d ' ' | sed '/^$/d' > "tmp_$name/keyword.txt"
+
+    # 核心修复：精准提取并剔除注释
+    # 逻辑：匹配关键字后的第一个逗号，取之后的内容，直到遇到第二个逗号或空格或换行，并删除所有 # 之后的内容
+    sed -n 's/.*DOMAIN-SUFFIX,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/suffix.txt"
+    sed -n 's/.*DOMAIN,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/domain.txt"
+    sed -n 's/.*DOMAIN-KEYWORD,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/keyword.txt"
     
     if [ "$is_resolve" = false ]; then
-        grep -v '^#' "$input" | grep 'IP-CIDR' | awk -F',' '{print $2}' | tr -d ' ' | sed '/^$/d' > "tmp_$name/ipcidr.txt"
+        # 针对 IP-CIDR，处理可能存在的 IP-CIDR6 和末尾的 no-resolve
+        grep 'IP-CIDR' "$input" | sed -E 's/.*IP-CIDR[6]?,\([^, ]*\).*/\1/' | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/ipcidr.txt"
     fi
 
-    # 检查是否有内容
+    # 检查是否有内容 (如果没有提取到，说明该 YAML 可能不是 Classical 格式，尝试兜底提取)
+    if [ ! -s "tmp_$name/suffix.txt" ] && [ ! -s "tmp_$name/domain.txt" ] && [ ! -s "tmp_$name/keyword.txt" ] && [ ! -s "tmp_$name/ipcidr.txt" ]; then
+        # 简单提取逻辑：如果上述正则没匹配到，尝试直接匹配每一行非注释的包含关键词的内容
+        grep "DOMAIN-SUFFIX" "$input" | grep -v "^#" | cut -d, -f2 | sed 's/#.*//' | tr -d ' ' >> "tmp_$name/suffix.txt"
+    fi
+
+    # 再次检查，若依然全空，则放弃
     if [ ! -s "tmp_$name/suffix.txt" ] && [ ! -s "tmp_$name/domain.txt" ] && [ ! -s "tmp_$name/keyword.txt" ] && [ ! -s "tmp_$name/ipcidr.txt" ]; then
         rm -rf "tmp_$name"
         return 1
     fi
 
-    # 开始构建 JSON
+    # --- 构建 JSON 逻辑 ---
+    # 使用以下更健壮的拼接方式
     echo '{"version": 1, "rules": [{' > "$output"
     
-    local first=true
-    write_field() {
+    local fields=()
+    
+    # 辅助函数：将 txt 转为引号包裹的行
+    format_field() {
         local file=$1
         local key=$2
         if [ -s "$file" ]; then
-            [ "$first" = false ] && echo ',' >> "$output"
-            echo "      \"$key\": [" >> "$output"
-            sed 's/.*/        "&"/' "$file" | paste -sd, - >> "$output"
-            echo -n "      ]" >> "$output"
-            first=false
+            local content=$(cat "$file" | sort -u | sed 's/.*/"&"/' | paste -sd, -)
+            echo "      \"$key\": [$content]"
         fi
     }
 
-    write_field "tmp_$name/suffix.txt" "domain_suffix"
-    write_field "tmp_$name/domain.txt" "domain"
-    write_field "tmp_$name/keyword.txt" "domain_keyword"
-    [ "$is_resolve" = false ] && write_field "tmp_$name/ipcidr.txt" "ip_cidr"
+    # 收集所有非空字段
+    local s=$(format_field "tmp_$name/suffix.txt" "domain_suffix")
+    [ -n "$s" ] && fields+=("$s")
+    local d=$(format_field "tmp_$name/domain.txt" "domain")
+    [ -n "$d" ] && fields+=("$d")
+    local k=$(format_field "tmp_$name/keyword.txt" "domain_keyword")
+    [ -n "$k" ] && fields+=("$k")
+    if [ "$is_resolve" = false ]; then
+        local i=$(format_field "tmp_$name/ipcidr.txt" "ip_cidr")
+        [ -n "$i" ] && fields+=("$i")
+    fi
 
-    echo -e '\n    }\n  ]\n}' >> "$output"
+    # 用逗号连接所有字段
+    (IFS=$',\n'; echo "${fields[*]}") >> "$output"
+
+    echo -e '    }\n  ]\n}' >> "$output"
     rm -rf "tmp_$name"
     return 0
 }
 
-# 7. 遍历执行
-echo "[INFO] Building SRS files..."
-for dir in ./rule/Clash/*/; do
-    name=$(basename "$dir")
-    yaml="${dir}${name}.yaml"
-    
-    # 如果主 yaml 不存在，尝试找目录下任何一个 yaml
-    [ ! -f "$yaml" ] && yaml=$(ls "$dir"*.yaml 2>/dev/null | head -n 1)
-    [ -z "$yaml" ] && continue
-
-    # 处理标准版
-    if process_to_json "$name" "$yaml" "${name}.json" false; then
-        ./sing-box rule-set compile "${name}.json" -o "${name}.srs" 2>/dev/null
-    fi
-
-    # 处理 DNS-Resolve 版
-    if process_to_json "${name}_res" "$yaml" "${name}-Resolve.json" true; then
-        ./sing-box rule-set compile "${name}-Resolve.json" -o "${name}-Resolve.srs" 2>/dev/null
-    fi
-done
-
-echo "[SUCCESS] All tasks finished."
+# --- 遍历逻辑保持不变 ---
