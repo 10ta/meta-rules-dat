@@ -16,19 +16,58 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	mv $path ./rule/Clash/
 done
 
-# --- 第二阶段：处理 Accademia 仓库并覆盖 ---
-echo "正在获取 Accademia 额外规则..."
+# --- 关键修改：增加 Accademia 详细日志与覆盖逻辑 ---
+echo "------------------------------------------"
+echo "[STEP] 准备获取 Accademia 额外规则..."
+
+# 采样对比：覆盖前
+if [ -f "./rule/Clash/ChinaMax/ChinaMax.yaml" ]; then
+    echo "[LOG] 覆盖前 ChinaMax.yaml (前15行):"
+    head -n 15 "./rule/Clash/ChinaMax/ChinaMax.yaml"
+    echo "------------------------------------------"
+else
+    echo "[WARN] 覆盖前未找到 ChinaMax.yaml"
+fi
+
 mkdir -p temp_accademia
-# 使用 git archive 或直接 clone --depth 1
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git temp_accademia
 
-# 将 Accademia 下的所有内容覆盖到 ./rule/Clash/
-# -f 强制覆盖，-r 递归目录
 if [ -d "temp_accademia" ]; then
-    cp -rf temp_accademia/* ./rule/Clash/
+    echo "[INFO] 开始逐文件夹合并 Accademia 规则..."
+    # 遍历下载下来的文件夹
+    cd temp_accademia
+    # 获取当前目录下所有文件夹名
+    dirs=$(find . -maxdepth 1 -type d ! -name ".")
+    for d in $dirs; do
+        folder_name=$(basename "$d")
+        echo "[MERGE] 正在处理规则目录: $folder_name"
+        
+        # 确保目标目录存在
+        mkdir -p "../rule/Clash/$folder_name"
+        
+        # 逐个移动文件并打印日志
+        files=$(find "$d" -maxdepth 1 -type f)
+        for f in $files; do
+            file_name=$(basename "$f")
+            cp -f "$f" "../rule/Clash/$folder_name/$file_name"
+            echo "  └─ [OK] 已替换/新增文件: $folder_name/$file_name"
+        done
+    done
+    cd ..
     rm -rf temp_accademia
-fi 
+else
+    echo "[ERROR] 克隆 Accademia 仓库失败！"
+fi
 
+# 采样对比：覆盖后
+echo "------------------------------------------"
+if [ -f "./rule/Clash/ChinaMax/ChinaMax.yaml" ]; then
+    echo "[LOG] 覆盖后 ChinaMax.yaml (前15行):"
+    head -n 15 "./rule/Clash/ChinaMax/ChinaMax.yaml"
+    echo "------------------------------------------"
+else
+    echo "[ERROR] 覆盖后未找到 ChinaMax.yaml"
+fi
 
 list=($(ls ./rule/Clash/))
 for ((i = 0; i < ${#list[@]}; i++)); do
