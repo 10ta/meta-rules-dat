@@ -1,73 +1,122 @@
 #!/bin/bash
 
-# --- 前置拉取与覆盖逻辑保持不变 ---
-# (此处省略拉取 Blackmatrix 和 Accademia 的代码，直接进入核心处理函数)
+# --- 1. 环境清理与准备 ---
+echo "[INFO] Cleaning workspace..."
+rm -rf rule acca_temp tmp_work *.json *.srs
+mkdir -p rule/Clash
 
-process_to_json() {
+# --- 2. 拉取 Blackmatrix (基础库) ---
+echo "[INFO] Cloning Blackmatrix..."
+git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp
+mv git_temp/rule/Clash/* rule/Clash/
+rm -rf git_temp
+
+# --- 3. 处理 Blackmatrix 的目录与 Classical 命名 ---
+echo "[INFO] Normalizing Blackmatrix structure..."
+# 将嵌套的子目录提取到根层级
+find ./rule/Clash -mindepth 2 -type f -name "*.yaml" | while read yaml; do
+    dir_name=$(basename "$(dirname "$yaml")")
+    mkdir -p "./rule/Clash/$dir_name"
+    mv -f "$yaml" "./rule/Clash/$dir_name/" 2>/dev/null
+done
+
+# 重命名 _Classical 文件
+for dir in ./rule/Clash/*/; do
+    name=$(basename "$dir")
+    if [ -f "${dir}${name}_Classical.yaml" ]; then
+        mv -f "${dir}${name}_Classical.yaml" "${dir}${name}.yaml"
+    fi
+done
+
+# --- 4. 拉取 Accademia 并强制覆盖 (优先级最高) ---
+echo "[INFO] Merging Accademia (High Priority)..."
+git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git acca_temp
+cp -Rf ./acca_temp/* ./rule/Clash/ 2>/dev/null
+rm -rf acca_temp
+
+# --- 5. 核心处理函数 (解决注释与 JSON 错误) ---
+process_rules() {
     local name=$1
     local input=$2
     local output=$3
     local is_resolve=$4
 
-    mkdir -p "tmp_$name"
+    local work_dir="tmp_work/$name"
+    mkdir -p "$work_dir"
 
-    # 核心修复：精准提取并剔除注释
-    # 逻辑：匹配关键字后的第一个逗号，取之后的内容，直到遇到第二个逗号或空格或换行，并删除所有 # 之后的内容
-    sed -n 's/.*DOMAIN-SUFFIX,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/suffix.txt"
-    sed -n 's/.*DOMAIN,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/domain.txt"
-    sed -n 's/.*DOMAIN-KEYWORD,\([^, ]*\).*/\1/p' "$input" | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/keyword.txt"
+    # 精准提取：取第一个逗号后、第二个逗号或空格或#之前的内容
+    sed -n 's/.*DOMAIN-SUFFIX,\([^, #]*\).*/\1/p' "$input" | tr -d ' ' | sed '/^$/d' | sort -u > "$work_dir/suffix.txt"
+    sed -n 's/.*DOMAIN,\([^, #]*\).*/\1/p' "$input" | tr -d ' ' | sed '/^$/d' | sort -u > "$work_dir/domain.txt"
+    sed -n 's/.*DOMAIN-KEYWORD,\([^, #]*\).*/\1/p' "$input" | tr -d ' ' | sed '/^$/d' | sort -u > "$work_dir/keyword.txt"
     
-    if [ "$is_resolve" = false ]; then
-        # 针对 IP-CIDR，处理可能存在的 IP-CIDR6 和末尾的 no-resolve
-        grep 'IP-CIDR' "$input" | sed -E 's/.*IP-CIDR[6]?,\([^, ]*\).*/\1/' | sed 's/#.*//' | tr -d ' ' | sed '/^$/d' > "tmp_$name/ipcidr.txt"
+    if [ "$is_resolve" = "false" ]; then
+        grep 'IP-CIDR' "$input" | sed -E 's/.*IP-CIDR[6]?,\([^, #]*\).*/\1/' | tr -d ' ' | sed '/^$/d' | sort -u > "$work_dir/ipcidr.txt"
     fi
 
-    # 检查是否有内容 (如果没有提取到，说明该 YAML 可能不是 Classical 格式，尝试兜底提取)
-    if [ ! -s "tmp_$name/suffix.txt" ] && [ ! -s "tmp_$name/domain.txt" ] && [ ! -s "tmp_$name/keyword.txt" ] && [ ! -s "tmp_$name/ipcidr.txt" ]; then
-        # 简单提取逻辑：如果上述正则没匹配到，尝试直接匹配每一行非注释的包含关键词的内容
-        grep "DOMAIN-SUFFIX" "$input" | grep -v "^#" | cut -d, -f2 | sed 's/#.*//' | tr -d ' ' >> "tmp_$name/suffix.txt"
-    fi
-
-    # 再次检查，若依然全空，则放弃
-    if [ ! -s "tmp_$name/suffix.txt" ] && [ ! -s "tmp_$name/domain.txt" ] && [ ! -s "tmp_$name/keyword.txt" ] && [ ! -s "tmp_$name/ipcidr.txt" ]; then
-        rm -rf "tmp_$name"
+    # 检查内容是否为空
+    if [ ! -s "$work_dir/suffix.txt" ] && [ ! -s "$work_dir/domain.txt" ] && \
+       [ ! -s "$work_dir/keyword.txt" ] && [ ! -s "$work_dir/ipcidr.txt" ]; then
+        rm -rf "$work_dir"
         return 1
     fi
 
-    # --- 构建 JSON 逻辑 ---
-    # 使用以下更健壮的拼接方式
-    echo '{"version": 1, "rules": [{' > "$output"
+    # 构造 JSON
+    echo '{"version":1,"rules":[{"' > "$output"
     
     local fields=()
     
-    # 辅助函数：将 txt 转为引号包裹的行
-    format_field() {
-        local file=$1
-        local key=$2
+    # 辅助：转为 JSON 数组
+    json_arr() {
+        local file=$1; local key=$2
         if [ -s "$file" ]; then
-            local content=$(cat "$file" | sort -u | sed 's/.*/"&"/' | paste -sd, -)
-            echo "      \"$key\": [$content]"
+            local items=$(cat "$file" | sed 's/.*/"&"/' | paste -sd, -)
+            echo "\"$key\":[$items]"
         fi
     }
 
-    # 收集所有非空字段
-    local s=$(format_field "tmp_$name/suffix.txt" "domain_suffix")
+    local s=$(json_arr "$work_dir/suffix.txt" "domain_suffix")
     [ -n "$s" ] && fields+=("$s")
-    local d=$(format_field "tmp_$name/domain.txt" "domain")
+    local d=$(json_arr "$work_dir/domain.txt" "domain")
     [ -n "$d" ] && fields+=("$d")
-    local k=$(format_field "tmp_$name/keyword.txt" "domain_keyword")
+    local k=$(json_arr "$work_dir/keyword.txt" "domain_keyword")
     [ -n "$k" ] && fields+=("$k")
-    if [ "$is_resolve" = false ]; then
-        local i=$(format_field "tmp_$name/ipcidr.txt" "ip_cidr")
+    
+    if [ "$is_resolve" = "false" ]; then
+        local i=$(json_arr "$work_dir/ipcidr.txt" "ip_cidr")
         [ -n "$i" ] && fields+=("$i")
     fi
 
-    # 用逗号连接所有字段
-    (IFS=$',\n'; echo "${fields[*]}") >> "$output"
-
-    echo -e '    }\n  ]\n}' >> "$output"
-    rm -rf "tmp_$name"
+    # 使用逗号合并字段
+    (IFS=,; echo "${fields[*]}") >> "$output"
+    echo '}]}' >> "$output"
+    
+    rm -rf "$work_dir"
     return 0
 }
 
-# --- 遍历逻辑保持不变 ---
+# --- 6. 执行编译 ---
+echo "[INFO] Processing all rules..."
+mkdir -p tmp_work
+list=($(ls ./rule/Clash/))
+
+for name in "${list[@]}"; do
+    yaml="./rule/Clash/$name/$name.yaml"
+    [ ! -f "$yaml" ] && yaml=$(ls ./rule/Clash/$name/*.yaml 2>/dev/null | head -n 1)
+    [ -z "$yaml" ] && continue
+
+    # 1. 标准版
+    if process_rules "$name" "$yaml" "${name}.json" "false"; then
+        ./sing-box rule-set compile "${name}.json" -o "${name}.srs" &>/dev/null
+        echo "  - Created: ${name}.srs"
+    fi
+
+    # 2. Resolve 版
+    if process_rules "${name}_res" "$yaml" "${name}-Resolve.json" "true"; then
+        ./sing-box rule-set compile "${name}-Resolve.json" -o "${name}-Resolve.srs" &>/dev/null
+        echo "  - Created: ${name}-Resolve.srs"
+    fi
+done
+
+# 清理
+rm -rf tmp_work
+echo "[SUCCESS] All sing-box rules are ready."
