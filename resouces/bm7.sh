@@ -1,20 +1,21 @@
 #!/bin/bash
 set +e
 
-# --- 1. 初始化 ---
-is_debug=true
+# --- 1. 配置开关 ---
+is_debug=false  # 已关闭。如需排查，请手动改为 true
+
+# --- 2. 环境初始化 ---
 rm -f *.json *.srs 2>/dev/null
 rm -rf tmp_work 2>/dev/null
 mkdir -p rule/Clash
 
-# --- 2. 资源同步 ---
+# --- 3. 资源同步 ---
 [ "$is_debug" = true ] && echo "[LOG] Fetching resources..."
 git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp &>/dev/null
 cp -rf git_temp/rule/Clash/* rule/Clash/
 rm -rf git_temp
 
-# 规范化：BM7 的 Classical 文件通常带下划线，我们先把它改名，确保主规则不被过滤
-# 注意：这一步只针对 BM7 原始目录下的 Classical
+# 规范化：BM7 Classical 文件预处理（确保主规则不被下划线逻辑过滤）
 find ./rule/Clash/ -type f -name "*_Classical.yaml" | while read c; do
     dir=$(dirname "$c"); base=$(basename "$dir")
     mv -f "$c" "$dir/$base.yaml"
@@ -25,36 +26,34 @@ git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git a
 cp -af ./acca_temp/* rule/Clash/ 2>/dev/null
 rm -rf acca_temp
 
-# --- 3. 处理逻辑 (精准过滤版) ---
-echo "[INFO] Processing Rules..."
+# --- 4. 核心处理逻辑 ---
+[ "$is_debug" = true ] && echo "[INFO] Processing Rules..."
 
-# 递归寻找所有的 .yaml 文件
+# 递归寻找所有 .yaml 文件
 find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
     file_full_name=$(basename "$yaml_file")
     name="${file_full_name%.*}"
     
-    # 【过滤逻辑核心】
-    # 1. 如果文件名包含下划线 "_", 视为变体文件，忽略。
+    # 【过滤逻辑】
+    # 忽略带下划线的变体文件
     if [[ "$name" == *"_"* ]]; then
         [ "$is_debug" = true ] && echo "[LOG: SKIP] Skipping variant: $file_full_name"
         continue
     fi
     
-    # 2. 忽略 config 等非规则文件
+    # 忽略非规则文件
     [[ "$name" == "config" ]] && continue
 
-    if [ "$is_debug" = true ]; then
-        echo -e "\n--- DEBUG START: $name ---"
-        echo "[LOG 1: Target File]: $yaml_file"
-    fi
+    [ "$is_debug" = true ] && echo -e "\n--- DEBUG START: $name ---"
 
     mkdir -p "tmp_work/$name"
 
-    # 【提取逻辑】
+    # 【精准提取函数】
     extract_final() {
         local key=$1
         local file_out="tmp_work/$name/$2.txt"
         
+        # 逻辑：匹配行首 -> 排除注释行 -> 删缩进 -> 删空格 -> 切分取值 -> 删行尾注释
         grep -iE "^[[:space:]]*- $key([[:space:]]*,|$)" "$yaml_file" | \
         grep -v '^[[:space:]]*#' | \
         sed 's/^[[:space:]-]*//' | \
@@ -68,6 +67,7 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
     extract_final "DOMAIN-KEYWORD" "keyword"
     extract_final "IP-CIDR|IP-CIDR6" "ipcidr"
 
+    # 【JSON & SRS 构建】
     build_json() {
         local mode=$1; local out_name=$2; local fields=()
         gen_box() {
@@ -83,6 +83,7 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
         [ "$mode" == "all" ] && { i=$(gen_box "ipcidr" "ip_cidr"); [ -n "$i" ] && fields+=("$i"); }
 
         if [ ${#fields[@]} -gt 0 ]; then
+            # 钉死 version: 2
             echo -n '{"version":2,"rules":[{' > "$out_name"
             (IFS=,; echo -n "${fields[*]}") >> "$out_name"
             echo '}]}' >> "$out_name"
@@ -93,19 +94,22 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
         return 1
     }
 
-    # 执行生成
     if build_json "all" "${name}.json"; then
-        [ "$is_debug" = true ] && echo "[RESULT] $name: Generated SUCCESS."
-        # 生成对应的 Resolve 版
+        [ "$is_debug" = true ] && echo "[RESULT] $name: SUCCESS."
         build_json "resolve" "${name}-Resolve.json" &>/dev/null
     fi
     
     [ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
 done
 
-# 依然保留临时目录供你最后一次核对
-# rm -rf tmp_work 2>/dev/null
+# --- 5. 结尾清理 ---
+if [ "$is_debug" = false ]; then
+    rm -rf tmp_work 2>/dev/null
+    [ "$is_debug" = false ] && echo "[INFO] Run complete. Cleanup finished."
+else
+    echo "[INFO] Debug mode on. tmp_work preserved."
+fi
 
-echo -e "\n------------------------------------------------"
-echo "[FINISH] Clean run complete. No underscored variants processed."
+echo "------------------------------------------------"
+echo "[FINISH] All tasks completed successfully."
 exit 0
