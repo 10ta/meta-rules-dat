@@ -2,7 +2,6 @@
 
 # --- 1. 环境清理 ---
 echo "[INFO] Cleaning workspace..."
-rm -rf rule acca_temp tmp_work *.json *.srs
 mkdir -p rule/Clash
 
 # --- 2. 拉取 Blackmatrix ---
