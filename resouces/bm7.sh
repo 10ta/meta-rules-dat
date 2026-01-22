@@ -4,85 +4,54 @@
 rm -rf rule acca_temp tmp_work *.json *.srs
 mkdir -p rule/Clash
 
-# --- 2. 拉取 Blackmatrix (基础库) ---
+# --- 2. 拉取 Blackmatrix ---
 echo "[INFO] Cloning Blackmatrix..."
 git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp
 cp -rf git_temp/rule/Clash/* rule/Clash/
 rm -rf git_temp
 
-# --- 3. 规范化 Blackmatrix (前置 Classical 处理) ---
-echo "[INFO] Normalizing Blackmatrix..."
+# --- 3. 规范化 Blackmatrix (处理 Classical) ---
 for dir in ./rule/Clash/*/; do
     [ -d "$dir" ] || continue
     name=$(basename "$dir")
-    # 如果有 Classical，先转成标准名，准备迎接 Accademia 的覆盖
     if [ -f "${dir}${name}_Classical.yaml" ]; then
         mv -f "${dir}${name}_Classical.yaml" "${dir}${name}.yaml"
     fi
 done
 
-# --- 4. 拉取 Accademia 并覆盖 ---
+# --- 4. 拉取 Accademia 并覆盖 (确保主 yaml 是 Accademia 的) ---
 echo "[INFO] Fetching Accademia rules..."
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git acca_temp
-
-echo "----------------------------------------------------------------"
-echo "[DEBUG NODE 1] Accademia Overriding Process:"
 for acca_dir in ./acca_temp/*/; do
     [ -d "$acca_dir" ] || continue
     dir_name=$(basename "$acca_dir")
     mkdir -p "./rule/Clash/$dir_name"
-    # 强制覆盖：Accademia 的内容会替换掉同名的 Blackmatrix 文件
-    cp -afv "$acca_dir". "./rule/Clash/$dir_name/" | sed 's/^/  /'
+    # 这一步非常关键：Accademia 的 Apple.yaml 会直接覆盖 Blackmatrix 的 Apple.yaml
+    cp -af "$acca_dir". "./rule/Clash/$dir_name/"
 done
-echo "----------------------------------------------------------------"
 rm -rf acca_temp
 
-# --- 5. 核心处理函数 (锁定 foo/foo.yaml 逻辑) ---
-process_rules() {
-    local name=$1
-    local dir=$2
-    local output=$3
-    local is_resolve=$4
+# --- 5. 核心处理逻辑 ---
+echo "[INFO] Compiling Standard & Resolve versions..."
+mkdir -p tmp_work
 
-    # 锁定唯一主文件：foo/foo.yaml
-    # 此时的 foo.yaml 如果被 Accademia 覆盖了，就是 Accademia 的内容
-    local yaml_file="${dir}/${name}.yaml"
+list=($(ls ./rule/Clash/))
+for name in "${list[@]}"; do
+    dir="./rule/Clash/$name"
+    [ -d "$dir" ] || continue
 
-    # 如果主文件不存在，则直接退出
-    if [ ! -f "$yaml_file" ]; then
-        return 1
-    fi
+    # 锁定主 YAML 文件
+    yaml_file="${dir}/${name}.yaml"
+    [ ! -f "$yaml_file" ] && continue
 
-    # 调试监控 NODE 2
-    if [ "$name" == "Apple" ] || [ "$name" == "apple" ]; then
-        echo "----------------------------------------------------------------"
-        echo "[DEBUG NODE 2] File content of $yaml_file (Top 20 lines):"
-        head -n 20 "$yaml_file"
-        echo "----------------------------------------------------------------"
-    fi
+    # --- 统一提取内容到临时文件 ---
+    mkdir -p "tmp_work/$name"
+    sed -n 's/.*DOMAIN-SUFFIX,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "tmp_work/$name/suffix.txt"
+    sed -n 's/.*DOMAIN,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "tmp_work/$name/domain.txt"
+    sed -n 's/.*DOMAIN-KEYWORD,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "tmp_work/$name/keyword.txt"
+    grep 'IP-CIDR' "$yaml_file" | sed -n 's/.*IP-CIDR[6]*,\([^, #]*\).*/\1/p' | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "tmp_work/$name/ipcidr.txt"
 
-    local work_dir="tmp_work/$name"
-    mkdir -p "$work_dir"
-
-    # 提取逻辑 (只针对单一 yaml_file)
-    sed -n 's/.*DOMAIN-SUFFIX,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "$work_dir/suffix.txt"
-    sed -n 's/.*DOMAIN,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "$work_dir/domain.txt"
-    sed -n 's/.*DOMAIN-KEYWORD,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "$work_dir/keyword.txt"
-    
-    if [ "$is_resolve" = "false" ]; then
-        grep 'IP-CIDR' "$yaml_file" | sed -n 's/.*IP-CIDR[6]*,\([^, #]*\).*/\1/p' | tr -d ' ' | sed 's/#.*//' | sort -u | sed '/^$/d' > "$work_dir/ipcidr.txt"
-    fi
-
-    # 判空
-    if [ ! -s "$work_dir/suffix.txt" ] && [ ! -s "$work_dir/domain.txt" ] && \
-       [ ! -s "$work_dir/keyword.txt" ] && [ ! -s "$work_dir/ipcidr.txt" ]; then
-        rm -rf "$work_dir"
-        return 1
-    fi
-
-    # 构造 JSON (修正头部引号)
-    echo -n '{"version":1,"rules":[{' > "$output"
-    local fields=()
+    # 提取公共域名数组逻辑
     json_arr() {
         local file=$1; local key=$2
         if [ -s "$file" ]; then
@@ -91,51 +60,42 @@ process_rules() {
         fi
     }
 
-    local s=$(json_arr "$work_dir/suffix.txt" "domain_suffix")
-    [ -n "$s" ] && fields+=("$s")
-    local d=$(json_arr "$work_dir/domain.txt" "domain")
-    [ -n "$d" ] && fields+=("$d")
-    local k=$(json_arr "$work_dir/keyword.txt" "domain_keyword")
-    [ -n "$k" ] && fields+=("$k")
-    if [ "$is_resolve" = "false" ]; then
-        local i=$(json_arr "$work_dir/ipcidr.txt" "ip_cidr")
-        [ -n "$i" ] && fields+=("$i")
+    # 预准备域名相关的字段
+    fields_domain=()
+    s=$(json_arr "tmp_work/$name/suffix.txt" "domain_suffix"); [ -n "$s" ] && fields_domain+=("$s")
+    d=$(json_arr "tmp_work/$name/domain.txt" "domain"); [ -n "$d" ] && fields_domain+=("$d")
+    k=$(json_arr "tmp_work/$name/keyword.txt" "domain_keyword"); [ -n "$k" ] && fields_domain+=("$k")
+
+    # 如果没有任何内容，跳过此规则
+    if [ ${#fields_domain[@]} -eq 0 ] && [ ! -s "tmp_work/$name/ipcidr.txt" ]; then
+        rm -rf "tmp_work/$name"
+        continue
     fi
 
-    local final_fields=$(IFS=,; echo "${fields[*]}")
-    echo -n "$final_fields" >> "$output"
-    echo '}]}' >> "$output"
-
-    # 调试监控 NODE 3
-    if [ "$name" == "Apple" ] || [ "$name" == "apple" ]; then
-        echo "[DEBUG NODE 3] JSON content BEFORE compiling (Top 150 chars):"
-        head -c 150 "$output"
-        echo -e "\n----------------------------------------------------------------"
-    fi
+    # --- 版本 1: Standard (带有 IP-CIDR) ---
+    standard_json="${name}.json"
+    echo -n '{"version":1,"rules":[{"' > "$standard_json"
     
-    rm -rf "$work_dir"
-    return 0
-}
+    fields_full=("${fields_domain[@]}")
+    i=$(json_arr "tmp_work/$name/ipcidr.txt" "ip_cidr")
+    [ -n "$i" ] && fields_full+=("$i")
+    
+    (IFS=,; echo -n "${fields_full[*]}") >> "$standard_json"
+    echo '}]}' >> "$standard_json"
+    ./sing-box rule-set compile "$standard_json" -o "${name}.srs" &>/dev/null
 
-# --- 6. 执行编译 ---
-echo "[INFO] Compiling SRS files..."
-mkdir -p tmp_work
-list=($(ls ./rule/Clash/))
-
-for name in "${list[@]}"; do
-    dir="./rule/Clash/$name"
-    [ -d "$dir" ] || continue
-
-    # 标准版
-    if process_rules "$name" "$dir" "${name}.json" "false"; then
-        ./sing-box rule-set compile "${name}.json" -o "${name}.srs" &>/dev/null
+    # --- 版本 2: Resolve (只有域名，剔除 IP-CIDR) ---
+    # 只有当存在域名规则时才生成 Resolve 版本
+    if [ ${#fields_domain[@]} -gt 0 ]; then
+        resolve_json="${name}-Resolve.json"
+        echo -n '{"version":1,"rules":[{"' > "$resolve_json"
+        (IFS=,; echo -n "${fields_domain[*]}") >> "$resolve_json"
+        echo '}]}' >> "$resolve_json"
+        ./sing-box rule-set compile "$resolve_json" -o "${name}-Resolve.srs" &>/dev/null
     fi
 
-    # Resolve 版
-    if process_rules "${name}_res" "$dir" "${name}-Resolve.json" "true"; then
-        ./sing-box rule-set compile "${name}-Resolve.json" -o "${name}-Resolve.srs" &>/dev/null
-    fi
+    rm -rf "tmp_work/$name"
 done
 
 rm -rf tmp_work
-echo "[SUCCESS] Process finished."
+echo "[SUCCESS] Process finished. All Standard and Resolve rules are ready."
