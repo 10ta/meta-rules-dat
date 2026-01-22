@@ -1,71 +1,62 @@
 #!/bin/bash
-
-# --- 1. 彻底关闭错误中断，确保脚本一定能跑到 exit 0 ---
 set +e
 
-# --- 2. 环境初始化 (只清理文件，不碰目录) ---
+# --- 1. 环境清理 ---
 rm -f *.json *.srs 2>/dev/null
 rm -rf tmp_work 2>/dev/null
 
-# --- 3. 资源拉取与暴力覆盖 ---
+# --- 2. 资源拉取 ---
 mkdir -p rule/Clash
 git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp &>/dev/null
 cp -rf git_temp/rule/Clash/* rule/Clash/
 rm -rf git_temp
 
-# 【核心修正】暴力重命名所有 Classical 文件，确保每个文件夹下都有同名 .yaml
-echo "[INFO] Normalizing file names..."
+# 规范化：确保每个目录都有一个跟目录同名的 .yaml
 find ./rule/Clash/ -type f -name "*_Classical.yaml" | while read c; do
-    dir=$(dirname "$c")
-    base=$(basename "$dir")
+    dir=$(dirname "$c"); base=$(basename "$dir")
     mv -f "$c" "$dir/$base.yaml"
 done
 
-# Accademia 强制覆盖
+# Accademia 覆盖
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git acca_temp &>/dev/null
 cp -af ./acca_temp/* ./rule/Clash/ 2>/dev/null
 rm -rf acca_temp
 
-# --- 4. 核心提取逻辑 ---
+# --- 3. 核心提取逻辑 ---
 echo "[INFO] Processing Rules..."
 mkdir -p tmp_work
 
 for dir in ./rule/Clash/*/ ; do
     [ -d "$dir" ] || continue
     name=$(basename "$dir")
-    
-    # 自动定位该目录下唯一的或同名的 yaml
-    yaml_file=$(ls "$dir$name.yaml" 2>/dev/null || ls "$dir"*.yaml 2>/dev/null | head -n 1)
+    yaml_file="${dir}${name}.yaml"
+    [ ! -f "$yaml_file" ] && yaml_file=$(ls "$dir"*.yaml 2>/dev/null | head -n 1)
     [ -z "$yaml_file" ] && continue
 
     mkdir -p "tmp_work/$name"
 
-    # 【提取逻辑绝杀】不再删除横杠，避免破坏 IP-CIDR 关键字
-    # 1. 抓取包含关键字的行
-    # 2. 删掉行首的空格、制表符、减号
-    # 3. 按逗号分割，取第 2 个字段
-    # 4. 删掉引号和 # 后的注释
-    extract_field() {
-        grep -E "$1" "$yaml_file" | grep -v '^#' | sed 's/^[[:space:]-]*//' | cut -d',' -f2 | tr -d '"'\'' ' | cut -d'#' -f1 | sort -u | sed '/^$/d'
+    # 【精准提取绝杀】
+    # 1. grep 排除掉所有包含 # 的行（不管 # 在哪，只要被注释了就不要）
+    # 2. 用 sed 删掉所有的空格、制表符、开头的横杠
+    # 3. 此时行格式统一为: DOMAIN,apple.com 或 DOMAINSUFFIX,apple.com
+    # 4. 用 cut 按逗号取第二列
+    extract_simple() {
+        grep "$1" "$yaml_file" | grep -v '#' | sed 's/[[:space:]-]//g' | cut -d',' -f2 | sort -u | sed '/^$/d'
     }
 
-    extract_field "DOMAIN-SUFFIX," > "tmp_work/$name/suffix.txt"
-    extract_field "DOMAIN," > "tmp_work/$name/domain.txt"
-    extract_field "DOMAIN-KEYWORD," > "tmp_work/$name/keyword.txt"
-    extract_field "IP-CIDR|IP-CIDR6," > "tmp_work/$name/ipcidr.txt"
+    extract_simple "DOMAIN-SUFFIX," > "tmp_work/$name/suffix.txt"
+    extract_simple "DOMAIN," > "tmp_work/$name/domain.txt"
+    extract_simple "DOMAIN-KEYWORD," > "tmp_work/$name/keyword.txt"
+    extract_simple "IP-CIDR" > "tmp_work/$name/ipcidr.txt"
 
     build_json() {
-        local mode=$1
-        local out=$2
-        local fields=()
-        
+        local mode=$1; local out=$2; local fields=()
         gen_box() {
             if [ -s "tmp_work/$name/$1.txt" ]; then
                 local items=$(cat "tmp_work/$name/$1.txt" | sed 's/.*/"&"/' | paste -sd, -)
                 echo "\"$2\":[$items]"
             fi
         }
-
         s=$(gen_box "suffix" "domain_suffix"); [ -n "$s" ] && fields+=("$s")
         d=$(gen_box "domain" "domain"); [ -n "$d" ] && fields+=("$d")
         k=$(gen_box "keyword" "domain_keyword"); [ -n "$k" ] && fields+=("$k")
@@ -87,14 +78,18 @@ for dir in ./rule/Clash/*/ ; do
     fi
 done
 
-# --- 5. 验证 Apple 是否包含 IP (如果还没包含，我就地辞职) ---
+# --- 4. 验证 ---
 echo "------------------------------------------------"
-echo "[VERIFY] Checking Apple.json content..."
+if [ -f "ChinaMax.json" ]; then
+    echo "[VERIFY] ChinaMax.json found. Content check:"
+    head -c 150 ChinaMax.json && echo "..."
+fi
 if [ -f "Apple.json" ]; then
-    grep "ip_cidr" Apple.json >/dev/null && echo "Result: IP-CIDR Found!" || echo "Result: IP-CIDR NOT FOUND!"
-    # 打印前 200 个字符
-    head -c 200 Apple.json && echo "..."
+    echo "[VERIFY] Apple.json found. Content check:"
+    head -c 150 Apple.json && echo "..."
 fi
 
-echo "[FINISH] All tasks completed. Exiting with 0."
+# 只清理临时目录，绝不碰 rule 目录
+rm -rf tmp_work 2>/dev/null
+echo "------------------------------------------------"
 exit 0
