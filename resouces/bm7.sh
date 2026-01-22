@@ -81,7 +81,10 @@ for dir in ./rule/Clash/*/ ; do
     rm -rf "tmp_work/$name"
 done
 
-rm -rf tmp_work rule 2>/dev/null || true
+rm -rf tmp_work 2>/dev/null
 
+echo "------------------------------------------------"
 echo "[FINISH] All rules processed successfully."
+
+# 强制以成功状态退出，无视之前的任何小错误
 exit 0
