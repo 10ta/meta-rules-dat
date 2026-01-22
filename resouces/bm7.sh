@@ -5,19 +5,19 @@ set +e
 rm -f *.json *.srs 2>/dev/null
 rm -rf tmp_work 2>/dev/null
 
-# --- 2. 资源拉取 ---
+# --- 2. 资源同步 ---
 mkdir -p rule/Clash
 git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp &>/dev/null
 cp -rf git_temp/rule/Clash/* rule/Clash/
 rm -rf git_temp
 
-# 规范化：确保每个目录都有一个跟目录同名的 .yaml
+# 规范化文件名
 find ./rule/Clash/ -type f -name "*_Classical.yaml" | while read c; do
     dir=$(dirname "$c"); base=$(basename "$dir")
     mv -f "$c" "$dir/$base.yaml"
 done
 
-# Accademia 覆盖
+# Accademia 强制覆盖
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git acca_temp &>/dev/null
 cp -af ./acca_temp/* ./rule/Clash/ 2>/dev/null
 rm -rf acca_temp
@@ -29,25 +29,27 @@ mkdir -p tmp_work
 for dir in ./rule/Clash/*/ ; do
     [ -d "$dir" ] || continue
     name=$(basename "$dir")
+    
     yaml_file="${dir}${name}.yaml"
     [ ! -f "$yaml_file" ] && yaml_file=$(ls "$dir"*.yaml 2>/dev/null | head -n 1)
     [ -z "$yaml_file" ] && continue
 
     mkdir -p "tmp_work/$name"
 
-    # 【精准提取绝杀】
-    # 1. grep 排除掉所有包含 # 的行（不管 # 在哪，只要被注释了就不要）
-    # 2. 用 sed 删掉所有的空格、制表符、开头的横杠
-    # 3. 此时行格式统一为: DOMAIN,apple.com 或 DOMAINSUFFIX,apple.com
-    # 4. 用 cut 按逗号取第二列
-    extract_simple() {
-        grep "$1" "$yaml_file" | grep -v '#' | sed 's/[[:space:]-]//g' | cut -d',' -f2 | sort -u | sed '/^$/d'
+    # 【逻辑对齐】
+    # 1. grep "$1"：锁定关键字行
+    # 2. grep -v '^[[:space:]]*#'：排除掉真正被注释掉的行
+    # 3. sed 's/[[:space:]-]//g'：删掉所有空格、制表符、横杠，格式化为 KEYWORD,VALUE#COMMENT
+    # 4. cut -d',' -f2：拿 VALUE#COMMENT
+    # 5. cut -d'#' -f1：彻底删掉行尾的注释部分，保留有效 VALUE
+    extract_correct() {
+        grep "$1" "$yaml_file" | grep -v '^[[:space:]]*#' | sed 's/[[:space:]-]//g' | cut -d',' -f2 | cut -d'#' -f1 | sort -u | sed '/^$/d'
     }
 
-    extract_simple "DOMAIN-SUFFIX," > "tmp_work/$name/suffix.txt"
-    extract_simple "DOMAIN," > "tmp_work/$name/domain.txt"
-    extract_simple "DOMAIN-KEYWORD," > "tmp_work/$name/keyword.txt"
-    extract_simple "IP-CIDR" > "tmp_work/$name/ipcidr.txt"
+    extract_correct "DOMAIN-SUFFIX," > "tmp_work/$name/suffix.txt"
+    extract_correct "DOMAIN," > "tmp_work/$name/domain.txt"
+    extract_correct "DOMAIN-KEYWORD," > "tmp_work/$name/keyword.txt"
+    extract_correct "IP-CIDR" > "tmp_work/$name/ipcidr.txt"
 
     build_json() {
         local mode=$1; local out=$2; local fields=()
@@ -80,16 +82,19 @@ done
 
 # --- 4. 验证 ---
 echo "------------------------------------------------"
-if [ -f "ChinaMax.json" ]; then
-    echo "[VERIFY] ChinaMax.json found. Content check:"
-    head -c 150 ChinaMax.json && echo "..."
-fi
-if [ -f "Apple.json" ]; then
-    echo "[VERIFY] Apple.json found. Content check:"
-    head -c 150 Apple.json && echo "..."
-fi
+check_file() {
+    if [ -f "$1" ]; then
+        echo "[VERIFY] $1 content check:"
+        # 检查是否包含关键字和内容
+        grep -q "domain" "$1" && echo "  - Domain fields: OK" || echo "  - Domain fields: EMPTY"
+        grep -q "ip_cidr" "$1" && echo "  - IP fields: OK" || echo "  - IP fields: EMPTY"
+        echo "  Preview: $(head -c 100 "$1")..."
+    fi
+}
 
-# 只清理临时目录，绝不碰 rule 目录
+check_file "Apple.json"
+check_file "ChinaMax.json"
+
 rm -rf tmp_work 2>/dev/null
 echo "------------------------------------------------"
 exit 0
