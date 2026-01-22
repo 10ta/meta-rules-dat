@@ -9,51 +9,52 @@ if [ ! -d rule ]; then
 	git pull --depth 1 origin master
 	rm -rf .git
 fi
-# --- 第一步：BlackMatrix 路径对齐 (保持原样) ---
+# 移动文件/目录到同一文件夹
 list=($(find ./rule/Clash/ | awk -F '/' '{print $5}' | sed '/^$/d' | grep -v '\.' | sort -u))
 for ((i = 0; i < ${#list[@]}; i++)); do
-    path=$(find ./rule/Clash/ -name ${list[i]})
-    mv $path ./rule/Clash/ 2>/dev/null
+	path=$(find ./rule/Clash/ -name ${list[i]})
+	mv $path ./rule/Clash/
 done
-
-# --- 第二步：提前处理 Classical 命名 (防止后续反向覆盖) ---
-# 先把 BlackMatrix 内部的 Classical 统一成标准名称
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-    if [ -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" ]; then
-        # 这里的 mv 会把 BM 自己的标准版覆盖，但没关系，因为后面 Accademia 还要来
-        mv -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" "./rule/Clash/${list[i]}/${list[i]}.yaml"
-    fi
-done
-
-# --- 第三步：Accademia 最后进场 (最高优先级覆盖) ---
-echo "------------------------------------------"
-echo "[STEP] 准备获取 Accademia 额外规则并进行最终覆盖..."
+# ==========================================
+# 插入 Accademia 合并逻辑 (仅此处为新增)
+# ==========================================
+echo "[STEP] 合并 Accademia 规则..."
 mkdir -p temp_accademia
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git temp_accademia
 
 if [ -d "temp_accademia" ]; then
-    # 使用 cp -rf 直接覆盖。此时目录里已经没有 _Classical 干扰了
-    # 这一步会把 Accademia 的文件强制写入 ./rule/Clash/对应文件夹/
+    # 在覆盖前，先删除 rule/Clash 里所有待覆盖文件夹中的 _Classical 文件
+    # 这样可以防止后面原脚本的 Classical 处理逻辑反向覆盖 Accademia 的内容
+    for d in temp_accademia/*; do
+        if [ -d "$d" ]; then
+            folder_name=$(basename "$d")
+            rm -f "./rule/Clash/$folder_name/${folder_name}_Classical.yaml" 2>/dev/null
+        fi
+    done
+
+    # 强制覆盖
     cp -rf temp_accademia/* ./rule/Clash/
     rm -rf temp_accademia
-    echo "[SUCCESS] Accademia 已完成最终覆盖，所有同名规则均以 Accademia 为准。"
 fi
-echo "------------------------------------------"
+# ==========================================
 
-# --- 第四步：清理掉多余的层级 (你原脚本中判断是否有 .yaml 的逻辑) ---
 list=($(ls ./rule/Clash/))
 for ((i = 0; i < ${#list[@]}; i++)); do
-    # 这里保持你原有的逻辑，清理那些不含 yaml 的空目录或深层目录
-    if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
-        directory=($(ls ./rule/Clash/${list[i]}))
-        for ((x = 0; x < ${#directory[@]}; x++)); do
-            mv ./rule/Clash/${list[i]}/${directory[x]} ./rule/Clash/${directory[x]}
-        done
-        rm -r ./rule/Clash/${list[i]}
-    fi
+	if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
+		directory=($(ls ./rule/Clash/${list[i]}))
+		for ((x = 0; x < ${#directory[@]}; x++)); do
+			mv ./rule/Clash/${list[i]}/${directory[x]} ./rule/Clash/${directory[x]}
+		done
+		rm -r ./rule/Clash/${list[i]}
+	fi
 done
 
+list=($(ls ./rule/Clash/))
+for ((i = 0; i < ${#list[@]}; i++)); do
+	if [ -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" ]; then
+		mv ./rule/Clash/${list[i]}/${list[i]}_Classical.yaml ./rule/Clash/${list[i]}/${list[i]}.yaml
+	fi
+done
 
 # 处理文件
 list=($(ls ./rule/Clash/))
