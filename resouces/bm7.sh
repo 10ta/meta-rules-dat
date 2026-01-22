@@ -1,248 +1,136 @@
 #!/bin/bash
 
-# 拉文件
-if [ ! -d rule ]; then
-	git init
-	git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
-	git config core.sparsecheckout true
-	echo "rule/Clash" >>.git/info/sparse-checkout
-	git pull --depth 1 origin master
-	rm -rf .git
-fi
-# 移动文件/目录到同一文件夹
-list=($(find ./rule/Clash/ | awk -F '/' '{print $5}' | sed '/^$/d' | grep -v '\.' | sort -u))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	path=$(find ./rule/Clash/ -name ${list[i]})
-	mv $path ./rule/Clash/
+# --- 1. 环境准备 ---
+echo "[INFO] 清理旧环境..."
+rm -rf rule temp_accademia rules_raw
+mkdir -p ./rules_raw
+
+# --- 2. 拉取 BlackMatrix (作为基础库) ---
+echo "[INFO] 正在拉取 BlackMatrix 基础规则..."
+git init tmp_git
+cd tmp_git
+git remote add origin https://github.com/blackmatrix7/ios_rule_script.git
+git config core.sparsecheckout true
+echo "rule/Clash" >> .git/info/sparse-checkout
+git pull --depth 1 origin master
+
+# 提取所有深层嵌套的 YAML 到扁平目录 rules_raw
+find rule/Clash -name "*.yaml" -exec cp {} ../rules_raw/ \;
+cd ..
+rm -rf tmp_git
+
+# --- 3. 预处理：统一 BlackMatrix 的命名 (解决 Classical 冲突) ---
+echo "[INFO] 正在对齐基础库命名 (Classical -> 标准)..."
+cd rules_raw
+for f in *_Classical.yaml; do
+    [ -f "$f" ] || continue
+    # 将 ChinaMax_Classical.yaml 重命名为 ChinaMax.yaml
+    target_name="${f%_Classical.yaml}.yaml"
+    mv -f "$f" "$target_name"
 done
+cd ..
 
-# --- 关键修改：增加 Accademia 详细日志与覆盖逻辑 ---
+# --- 4. 拉取 Accademia 并强制覆盖 (最高优先级) ---
 echo "------------------------------------------"
-echo "[STEP] 准备获取 Accademia 额外规则..."
-
-# 采样对比：覆盖前
-if [ -f "./rule/Clash/ChinaMax/ChinaMax.yaml" ]; then
-    echo "[LOG] 覆盖前 ChinaMax.yaml (前15行):"
-    head -n 15 "./rule/Clash/ChinaMax/ChinaMax.yaml"
-    echo "------------------------------------------"
-else
-    echo "[WARN] 覆盖前未找到 ChinaMax.yaml"
-fi
-
-mkdir -p temp_accademia
+echo "[STEP] 准备获取 Accademia 覆盖规则..."
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git temp_accademia
 
 if [ -d "temp_accademia" ]; then
-    echo "[INFO] 开始逐文件夹合并 Accademia 规则..."
-    # 遍历下载下来的文件夹
-    cd temp_accademia
-    # 获取当前目录下所有文件夹名
-    dirs=$(find . -maxdepth 1 -type d ! -name ".")
-    for d in $dirs; do
-        folder_name=$(basename "$d")
-        echo "[MERGE] 正在处理规则目录: $folder_name"
+    echo "[INFO] 正在执行 Accademia 最终覆盖..."
+    # 查找 Accademia 中所有的 YAML 文件
+    find temp_accademia -name "*.yaml" -type f | while read -r src; do
+        file_name=$(basename "$src")
+        # 强制覆盖 rules_raw 里的同名文件
+        cp -f "$src" "./rules_raw/$file_name"
         
-        # 确保目标目录存在
-        mkdir -p "../rule/Clash/$folder_name"
-        
-        # 逐个移动文件并打印日志
-        files=$(find "$d" -maxdepth 1 -type f)
-        for f in $files; do
-            file_name=$(basename "$f")
-            cp -f "$f" "../rule/Clash/$folder_name/$file_name"
-            echo "  └─ [OK] 已替换/新增文件: $folder_name/$file_name"
-        done
+        # 针对 ChinaMax 打印覆盖确认日志
+        if [ "$file_name" == "ChinaMax.yaml" ]; then
+            echo "  └─ [CRITICAL] ChinaMax.yaml 已替换为 Accademia 版本"
+            echo "     (采样前5行):"
+            head -n 5 "./rules_raw/ChinaMax.yaml"
+        fi
     done
-    cd ..
     rm -rf temp_accademia
 else
-    echo "[ERROR] 克隆 Accademia 仓库失败！"
+    echo "[ERROR] 克隆 Accademia 失败！"
 fi
-
-# 采样对比：覆盖后
 echo "------------------------------------------"
-if [ -f "./rule/Clash/ChinaMax/ChinaMax.yaml" ]; then
-    echo "[LOG] 覆盖后 ChinaMax.yaml (前15行):"
-    head -n 15 "./rule/Clash/ChinaMax/ChinaMax.yaml"
-    echo "------------------------------------------"
-else
-    echo "[ERROR] 覆盖后未找到 ChinaMax.yaml"
-fi
 
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
-		directory=($(ls ./rule/Clash/${list[i]}))
-		for ((x = 0; x < ${#directory[@]}; x++)); do
-			mv ./rule/Clash/${list[i]}/${directory[x]} ./rule/Clash/${directory[x]}
-		done
-		rm -r ./rule/Clash/${list[i]}
-	fi
+# --- 5. 统一生成 sing-box 规则集 (.srs) ---
+echo "[INFO] 开始转换并编译 sing-box 规则集..."
+
+# 确保 sing-box 可执行
+chmod +x ./sing-box 2>/dev/null
+
+for yaml_path in ./rules_raw/*.yaml; do
+    [ -f "$yaml_path" ] || continue
+    
+    file_name=$(basename "$yaml_path")
+    rule_name="${file_name%.*}"
+    
+    # 过滤无关文件
+    [[ "$rule_name" == "README" || "$rule_name" == "LICENSE" ]] && continue
+
+    echo "[PROCESS] 正在转换: $rule_name"
+
+    # 临时存放解析出的字段
+    tmp_dir="./tmp_$rule_name"
+    mkdir -p "$tmp_dir"
+
+    # 提取字段 (去重、去空格、去注释)
+    grep 'DOMAIN-SUFFIX,' "$yaml_path" | sed 's/.*DOMAIN-SUFFIX,//g' | tr -d ' ' | sort -u > "$tmp_dir/suffix.list"
+    grep 'DOMAIN,' "$yaml_path" | sed 's/.*DOMAIN,//g' | tr -d ' ' | sort -u > "$tmp_dir/domain.list"
+    grep 'DOMAIN-KEYWORD,' "$yaml_path" | sed 's/.*DOMAIN-KEYWORD,//g' | tr -d ' ' | sort -u > "$tmp_dir/keyword.list"
+    grep 'IP-CIDR' "$yaml_path" | sed 's/.*IP-CIDR,//g' | sed 's/.*IP-CIDR6,//g' | tr -d ' ' | sort -u > "$tmp_dir/ipcidr.list"
+
+    # JSON 生成函数
+    generate_json() {
+        local output=$1
+        local is_resolve=$2
+        
+        echo "{" > "$output"
+        echo "  \"version\": 1," >> "$output"
+        echo "  \"rules\": [{" >> "$output"
+        
+        local first_item=true
+        write_field() {
+            local field_name=$1
+            local list_file=$2
+            if [ -s "$list_file" ]; then
+                [ "$first_item" = false ] && echo "," >> "$output"
+                echo "      \"$field_name\": [" >> "$output"
+                sed 's/.*/        "&"/' "$list_file" | sed '$!s/$/,/' >> "$output"
+                echo -n "      ]" >> "$output"
+                first_item=false
+            fi
+        }
+
+        write_field "domain" "$tmp_dir/domain.list"
+        write_field "domain_suffix" "$tmp_dir/suffix.list"
+        write_field "domain_keyword" "$tmp_dir/keyword.list"
+        # 如果不是 Resolve 版本，则写入 IP
+        if [ "$is_resolve" = false ]; then
+            write_field "ip_cidr" "$tmp_dir/ipcidr.list"
+        fi
+
+        echo "" >> "$output"
+        echo "    }]" >> "$output"
+        echo "}" >> "$output"
+    }
+
+    # 1. 编译标准版
+    generate_json "$rule_name.json" false
+    ./sing-box rule-set compile "$rule_name.json" -o "$rule_name.srs"
+
+    # 2. 编译 DNS-only 版 (不含 IP)
+    generate_json "$rule_name-Resolve.json" true
+    ./sing-box rule-set compile "$rule_name-Resolve.json" -o "$rule_name-Resolve.srs"
+
+    # 清理临时 JSON 和文件夹
+    rm -rf "$tmp_dir" "$rule_name.json" "$rule_name-Resolve.json"
 done
 
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	if [ -f "./rule/Clash/${list[i]}/${list[i]}_Classical.yaml" ]; then
-		mv ./rule/Clash/${list[i]}/${list[i]}_Classical.yaml ./rule/Clash/${list[i]}/${list[i]}.yaml
-	fi
-done
-
-# 处理文件
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	mkdir -p ${list[i]}
-	# 归类
-	# # android package
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS | grep -v '\.exe' | grep -v '/' | grep '\.')" ]; then
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' |  grep PROCESS | grep -v '\.exe' | grep -v '/' | grep '\.' | sed 's/  - PROCESS-NAME,//g' > ${list[i]}/package.json
-	# fi
-	# # process name
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS | grep -v '/' | grep -v '\.')" ]; then
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep -v '#' | grep PROCESS | grep -v '/' | grep -v '\.' | sed 's/  - PROCESS-NAME,//g' > ${list[i]}/process.json
-	# fi
-	# if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep PROCESS |  grep '\.exe')" ]; then
-	# 	cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep -v '#' | grep PROCESS |  grep '\.exe' | sed 's/  - PROCESS-NAME,//g' >> ${list[i]}/process.json
-	# fi
-	# domain
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
-	fi
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
-	fi
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
-	fi
-	# ipcidr
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- IP-CIDR')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- IP-CIDR' | sed 's/  - IP-CIDR,//g' | sed 's/  - IP-CIDR6,//g' > ${list[i]}/ipcidr.json
-	fi
-	# 转成json格式
-	# # android package
-	# if [ -f "${list[i]}/package.json" ]; then
-	# 	sed -i 's/^/        "/g' ${list[i]}/package.json
-	# 	sed -i 's/$/",/g' ${list[i]}/package.json
-	# 	sed -i '1s/^/      "package_name": [\n/g' ${list[i]}/package.json
-	# 	sed -i '$ s/,$/\n      ],/g' ${list[i]}/package.json
-	# fi
-	# # process name
-	# if [ -f "${list[i]}/process.json" ]; then
-	# 	sed -i 's/^/        "/g' ${list[i]}/process.json
-	# 	sed -i 's/$/",/g' ${list[i]}/process.json
-	# 	sed -i '1s/^/      "process_name": [\n/g' ${list[i]}/process.json
-	# 	sed -i '$ s/,$/\n      ],/g' ${list[i]}/process.json
-	# fi
-	# domain
-	if [ -f "${list[i]}/domain.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/domain.json
-		sed -i 's/$/",/g' ${list[i]}/domain.json
-		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
-	fi
-	if [ -f "${list[i]}/suffix.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/suffix.json
-		sed -i 's/$/",/g' ${list[i]}/suffix.json
-		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
-	fi
-	if [ -f "${list[i]}/keyword.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/keyword.json
-		sed -i 's/$/",/g' ${list[i]}/keyword.json
-		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
-	fi
-	# ipcidr
-	if [ -f "${list[i]}/ipcidr.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/ipcidr.json
-		sed -i 's/$/",/g' ${list[i]}/ipcidr.json
-		sed -i '1s/^/      "ip_cidr": [\n/g' ${list[i]}/ipcidr.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/ipcidr.json
-	fi
-	# 合并文件
-	# if [ -f "${list[i]}/package.json" -a -f "${list[i]}/process.json" ]; then
-	# 	mv ${list[i]}/package.json ${list[i]}.json
-	# 	sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}.json
-	# 	cat ${list[i]}/process.json >> ${list[i]}.json
-	# 	rm ${list[i]}/process.json
-	# elif [ -f "${list[i]}/package.json" ]; then
-	# 	mv ${list[i]}/package.json ${list[i]}.json
-	# elif [ -f "${list[i]}/process.json" ]; then
-	# 	mv ${list[i]}/process.json ${list[i]}.json
-	# fi
-
-	if [ "$(ls ${list[i]})" = "" ]; then
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
-	elif [ -f "${list[i]}.json" ]; then
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
-		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}.json
-		cat ${list[i]}/* >> ${list[i]}.json
-	else
-		cat ${list[i]}/* >> ${list[i]}.json
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}.json
-	fi
-	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}.json
-	rm -r ${list[i]}
-	./sing-box rule-set compile ${list[i]}.json -o ${list[i]}.srs
-done
-
-echo "------ DNS-only Start ------"
-# 处理文件
-list=($(ls ./rule/Clash/))
-for ((i = 0; i < ${#list[@]}; i++)); do
-	mkdir -p ${list[i]}
-	# 归类
-	# domain
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-SUFFIX,')" ]; then
-		# cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/domain.json
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-SUFFIX,' | sed 's/  - DOMAIN-SUFFIX,//g' > ${list[i]}/suffix.json
-	fi
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN,' | sed 's/  - DOMAIN,//g' >> ${list[i]}/domain.json
-	fi
-	if [ -n "$(cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep '\- DOMAIN-KEYWORD,')" ]; then
-		cat ./rule/Clash/${list[i]}/${list[i]}.yaml | grep -v '#' | grep '\- DOMAIN-KEYWORD,' | sed 's/  - DOMAIN-KEYWORD,//g' > ${list[i]}/keyword.json
-	fi
-
-# echo "------ 转成json格式 Start ------"
-	# 转成json格式
-	# android package
-	# domain
-	if [ -f "${list[i]}/domain.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/domain.json
-		sed -i 's/$/",/g' ${list[i]}/domain.json
-		sed -i '1s/^/      "domain": [\n/g' ${list[i]}/domain.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/domain.json
-	fi
-	if [ -f "${list[i]}/suffix.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/suffix.json
-		sed -i 's/$/",/g' ${list[i]}/suffix.json
-		sed -i '1s/^/      "domain_suffix": [\n/g' ${list[i]}/suffix.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/suffix.json
-	fi
-	if [ -f "${list[i]}/keyword.json" ]; then
-		sed -i 's/^/        "/g' ${list[i]}/keyword.json
-		sed -i 's/$/",/g' ${list[i]}/keyword.json
-		sed -i '1s/^/      "domain_keyword": [\n/g' ${list[i]}/keyword.json
-		sed -i '$ s/,$/\n      ],/g' ${list[i]}/keyword.json
-	fi
-
-# echo "------ 合并文件 Start------"
-	if [ "$(ls ${list[i]})" = "" ]; then
-		# echo "${list[i]}: void"
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
-	elif [ -f "${list[i]}-Resolve.json" ]; then
-		# echo "${list[i]}": "exists"
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
-		sed -i '$ s/,$/\n    },\n    {/g' ${list[i]}-Resolve.json
-		cat ${list[i]}/* >> ${list[i]}-Resolve.json
-	else
-		# echo "${list[i]}: final"
-		cat ${list[i]}/* >> ${list[i]}-Resolve.json
-		sed -i '1s/^/{\n  "version": 1,\n  "rules": [\n    {\n/g' ${list[i]}-Resolve.json
-	fi
-	# echo "final merge"
-	sed -i '$ s/,$/\n    }\n  ]\n}/g' ${list[i]}-Resolve.json
-	rm -r ${list[i]}
-	./sing-box rule-set compile ${list[i]}-Resolve.json -o ${list[i]}-Resolve.srs
-done
+# --- 6. 扫尾工作 ---
+rm -rf rules_raw
+echo "------------------------------------------"
+echo "[SUCCESS] 全部流程处理完成！"
