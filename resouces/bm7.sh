@@ -75,20 +75,37 @@ rm -rf accademia_tmp
 
 echo "========== STAGE 7: Compile rule-sets =========="
 
-mapfile -t RULES < <(find ./rule/Clash -mindepth 1 -maxdepth 1 -type d -printf "%f\n")
+mapfile -t RULES < <(
+	find ./rule/Clash -maxdepth 1 \
+		\( -type d -o -type f \) \
+		-printf "%f\n" \
+	| sed 's/\.yaml$//' \
+	| sort -u
+)
 
 for r in "${RULES[@]}"; do
 	echo "[COMPILE] $r"
+
 	work="./_work_$r"
 	mkdir "$work"
 
-	yaml="./rule/Clash/$r/$r.yaml"
-	[ -f "$yaml" ] || { echo "  skip (no yaml)"; rm -rf "$work"; continue; }
+	yaml=""
+	if [ -f "./rule/Clash/$r/$r.yaml" ]; then
+		yaml="./rule/Clash/$r/$r.yaml"
+	elif [ -f "./rule/Clash/$r.yaml" ]; then
+		yaml="./rule/Clash/$r.yaml"
+	else
+		echo "  skip (no yaml found)"
+		rm -rf "$work"
+		continue
+	fi
 
-	grep -v '#' "$yaml" | grep 'DOMAIN-SUFFIX,' | sed 's/.*,//' > "$work/suffix"
-	grep -v '#' "$yaml" | grep 'DOMAIN-KEYWORD,' | sed 's/.*,//' > "$work/keyword"
-	grep -v '#' "$yaml" | grep 'DOMAIN,' | sed 's/.*,//' > "$work/domain"
-	grep -v '#' "$yaml" | grep 'IP-CIDR' | sed 's/.*,//' > "$work/ipcidr"
+	echo "  use yaml: $yaml"
+
+	grep -v '#' "$yaml" | grep 'DOMAIN-SUFFIX,' | sed 's/.*,//' > "$work/suffix" || true
+	grep -v '#' "$yaml" | grep 'DOMAIN-KEYWORD,' | sed 's/.*,//' > "$work/keyword" || true
+	grep -v '#' "$yaml" | grep 'DOMAIN,' | sed 's/.*,//' > "$work/domain" || true
+	grep -v '#' "$yaml" | grep 'IP-CIDR' | sed 's/.*,//' > "$work/ipcidr" || true
 
 	json="$r.json"
 	echo '{ "version": 1, "rules": [ {' > "$json"
