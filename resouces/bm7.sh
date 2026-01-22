@@ -8,33 +8,38 @@ mkdir -p rule/Clash
 # --- 2. 拉取 Blackmatrix (基础库) ---
 echo "[INFO] Cloning Blackmatrix..."
 git clone --depth 1 https://github.com/blackmatrix7/ios_rule_script.git git_temp
-mv git_temp/rule/Clash/* rule/Clash/
+# 只要 Clash 目录下的内容
+cp -rf git_temp/rule/Clash/* rule/Clash/
 rm -rf git_temp
 
-# --- 3. 处理 Blackmatrix 的目录与 Classical 命名 ---
+# --- 3. 规范化 Blackmatrix 结构 ---
 echo "[INFO] Normalizing Blackmatrix structure..."
-find ./rule/Clash -mindepth 2 -type f -name "*.yaml" | while read yaml; do
-    dir_name=$(basename "$(dirname "$yaml")")
-    mkdir -p "./rule/Clash/$dir_name"
-    mv -f "$yaml" "./rule/Clash/$dir_name/" 2>/dev/null
-done
-
-# 重命名 _Classical 文件 (确保基础文件名统一)
+# 统一重命名 _Classical 文件，确保基础文件名在 Accademia 覆盖前已经就绪
 for dir in ./rule/Clash/*/; do
+    [ -d "$dir" ] || continue
     name=$(basename "$dir")
     if [ -f "${dir}${name}_Classical.yaml" ]; then
         mv -f "${dir}${name}_Classical.yaml" "${dir}${name}.yaml"
     fi
 done
 
-# --- 4. 拉取 Accademia 并覆盖 (优先级最高) ---
-echo "[INFO] Merging Accademia (High Priority)..."
+# --- 4. 拉取 Accademia 并覆盖 (最高优先级) ---
+echo "[INFO] Fetching Accademia rules..."
 git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git acca_temp
-# 使用 cp -Rf 确保 Accademia 的内容完全覆盖/合并入对应文件夹
-cp -Rf ./acca_temp/* ./rule/Clash/ 2>/dev/null
+
+echo "[INFO] Merging Accademia (Priority: High)..."
+# 遍历 Accademia 的所有目录并强制覆盖 rule/Clash 对应的目录
+for acca_dir in ./acca_temp/*/; do
+    [ -d "$acca_dir" ] || continue
+    dir_name=$(basename "$acca_dir")
+    mkdir -p "./rule/Clash/$dir_name"
+    # 强制同步内容：-a 保持属性，-v 显示覆盖
+    cp -af "$acca_dir". "./rule/Clash/$dir_name/"
+    echo "  - Applied Accademia Override: $dir_name"
+done
 rm -rf acca_temp
 
-# --- 5. 核心处理函数 (修复 sed 报错与多文件合并) ---
+# --- 5. 核心处理函数 ---
 process_rules() {
     local name=$1
     local dir=$2
@@ -44,42 +49,41 @@ process_rules() {
     local work_dir="tmp_work/$name"
     mkdir -p "$work_dir"
 
-    # 扫描目录下所有的 .yaml 文件 (解决 Accademia 文件名不标准问题)
-    # 使用通配符合并处理该目录下所有内容
+    # 扫描该目录下所有 yaml，提取规则
     for yaml_file in "$dir"/*.yaml; do
-        [ -e "$yaml_file" ] || continue
+        [ -f "$yaml_file" ] || continue
         
-        # 修复后的 sed 提取逻辑：删除 -E 并正确处理转义，或者使用基础正则
+        # 提取逻辑：剔除注释，提取关键字段
         sed -n 's/.*DOMAIN-SUFFIX,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' >> "$work_dir/suffix_raw.txt"
         sed -n 's/.*DOMAIN,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' >> "$work_dir/domain_raw.txt"
         sed -n 's/.*DOMAIN-KEYWORD,\([^, #]*\).*/\1/p' "$yaml_file" | tr -d ' ' | sed 's/#.*//' >> "$work_dir/keyword_raw.txt"
         
         if [ "$is_resolve" = "false" ]; then
-            # 修复 IP-CIDR 的 sed 表达式
             grep 'IP-CIDR' "$yaml_file" | sed -n 's/.*IP-CIDR[6]*,\([^, #]*\).*/\1/p' | tr -d ' ' | sed 's/#.*//' >> "$work_dir/ipcidr_raw.txt"
         fi
     done
 
-    # 去重并清理空行
+    # 清理与去重
     [ -f "$work_dir/suffix_raw.txt" ] && sort -u "$work_dir/suffix_raw.txt" | sed '/^$/d' > "$work_dir/suffix.txt"
     [ -f "$work_dir/domain_raw.txt" ] && sort -u "$work_dir/domain_raw.txt" | sed '/^$/d' > "$work_dir/domain.txt"
     [ -f "$work_dir/keyword_raw.txt" ] && sort -u "$work_dir/keyword_raw.txt" | sed '/^$/d' > "$work_dir/keyword.txt"
     [ -f "$work_dir/ipcidr_raw.txt" ] && sort -u "$work_dir/ipcidr_raw.txt" | sed '/^$/d' > "$work_dir/ipcidr.txt"
 
-    # 检查内容是否为空
+    # 判空
     if [ ! -s "$work_dir/suffix.txt" ] && [ ! -s "$work_dir/domain.txt" ] && \
        [ ! -s "$work_dir/keyword.txt" ] && [ ! -s "$work_dir/ipcidr.txt" ]; then
         rm -rf "$work_dir"
         return 1
     fi
 
-    # 构造 JSON
-    echo '{"version":1,"rules":[{"' > "$output"
+    # --- 构造 JSON (修正双引号问题) ---
+    # 头部：注意这里的引号闭合
+    echo -n '{"version":1,"rules":[{' > "$output"
     local fields=()
-    
     json_arr() {
         local file=$1; local key=$2
         if [ -s "$file" ]; then
+            # 将每一行转为 "item" 并用逗号连接
             local items=$(cat "$file" | sed 's/.*/"&"/' | paste -sd, -)
             echo "\"$key\":[$items]"
         fi
@@ -97,7 +101,11 @@ process_rules() {
         [ -n "$i" ] && fields+=("$i")
     fi
 
-    (IFS=,; echo "${fields[*]}") >> "$output"
+    # 用逗号连接所有字段并写入
+    local final_fields=$(IFS=,; echo "${fields[*]}")
+    echo -n "$final_fields" >> "$output"
+    
+    # 尾部
     echo '}]}' >> "$output"
     
     rm -rf "$work_dir"
@@ -105,26 +113,24 @@ process_rules() {
 }
 
 # --- 6. 执行编译 ---
-echo "[INFO] Processing all rules..."
+echo "[INFO] Compiling SRS files..."
 mkdir -p tmp_work
 list=($(ls ./rule/Clash/))
 
 for name in "${list[@]}"; do
     dir="./rule/Clash/$name"
-    [ ! -d "$dir" ] && continue
+    [ -d "$dir" ] || continue
 
-    # 1. 标准版 (传入目录而非单个文件，实现目录下所有 yaml 合并)
+    # 1. 标准版
     if process_rules "$name" "$dir" "${name}.json" "false"; then
         ./sing-box rule-set compile "${name}.json" -o "${name}.srs" &>/dev/null
-        echo "  - Created: ${name}.srs"
     fi
 
     # 2. Resolve 版
     if process_rules "${name}_res" "$dir" "${name}-Resolve.json" "true"; then
         ./sing-box rule-set compile "${name}-Resolve.json" -o "${name}-Resolve.srs" &>/dev/null
-        echo "  - Created: ${name}-Resolve.srs"
     fi
 done
 
 rm -rf tmp_work
-echo "[SUCCESS] All sing-box rules are ready."
+echo "[SUCCESS] All tasks completed."
