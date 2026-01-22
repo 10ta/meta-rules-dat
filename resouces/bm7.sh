@@ -16,6 +16,20 @@ for ((i = 0; i < ${#list[@]}; i++)); do
 	mv $path ./rule/Clash/
 done
 
+# --- 第二阶段：处理 Accademia 仓库并覆盖 ---
+echo "正在获取 Accademia 额外规则..."
+mkdir -p temp_accademia
+# 使用 git archive 或直接 clone --depth 1
+git clone --depth 1 https://github.com/Accademia/Additional_Rule_For_Clash.git temp_accademia
+
+# 将 Accademia 下的所有内容覆盖到 ./rule/Clash/
+# -f 强制覆盖，-r 递归目录
+if [ -d "temp_accademia" ]; then
+    cp -rf temp_accademia/* ./rule/Clash/
+    rm -rf temp_accademia
+fi 
+
+
 list=($(ls ./rule/Clash/))
 for ((i = 0; i < ${#list[@]}; i++)); do
 	if [ -z "$(ls ./rule/Clash/${list[i]} | grep '.yaml')" ]; then
