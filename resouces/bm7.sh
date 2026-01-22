@@ -81,5 +81,7 @@ for dir in ./rule/Clash/*/ ; do
     rm -rf "tmp_work/$name"
 done
 
-rm -rf tmp_work rule
-echo "[FINISH] All rules processed."
+rm -rf tmp_work rule 2>/dev/null || true
+
+echo "[FINISH] All rules processed successfully."
+exit 0
