@@ -35,6 +35,12 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
 	file_full_name=$(basename "$yaml_file")
 	name="${file_full_name%.*}"
 
+	# 【最源头过滤】：直接忽略带 No_Resolve 或 NoResolve 的文件
+	if [[ "$name" == *"No_Resolve"* ]] || [[ "$name" == *"NoResolve"* ]]; then
+		[ "$is_debug" = true ] && echo "[LOG: SKIP] Skipping No_Resolve variant: $file_full_name"
+		continue
+	fi
+
 	# 【处理逻辑】
 	# 将带下划线的文件名去除下划线 (例如 A_1 转换为 A1)
 	if [[ "$name" == *"_"* ]]; then
