@@ -17,9 +17,9 @@ rm -rf git_temp
 
 # 规范化：BM7 Classical 文件预处理（确保主规则不被下划线逻辑过滤）
 find ./rule/Clash/ -type f -name "*_Classical.yaml" | while read c; do
-	dir=$(dirname "$c")
-	base=$(basename "$dir")
-	mv -f "$c" "$dir/$base.yaml"
+    dir=$(dirname "$c")
+    base=$(basename "$dir")
+    mv -f "$c" "$dir/$base.yaml"
 done
 
 # Accademia 覆盖
@@ -32,100 +32,109 @@ rm -rf acca_temp
 
 # 递归寻找所有 .yaml 文件
 find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
-	file_full_name=$(basename "$yaml_file")
-	name="${file_full_name%.*}"
+    file_full_name=$(basename "$yaml_file")
+    name="${file_full_name%.*}"
 
-	# 【最源头过滤】：直接忽略带 No_Resolve 或 NoResolve 的文件
-	if [[ "$name" == *"No_Resolve"* ]] || [[ "$name" == *"NoResolve"* ]]; then
-		[ "$is_debug" = true ] && echo "[LOG: SKIP] Skipping No_Resolve variant: $file_full_name"
-		continue
-	fi
+    # 【最源头过滤】：直接忽略带 No_Resolve 或 NoResolve 的文件
+    if [[ "$name" == *"No_Resolve"* ]] || [[ "$name" == *"NoResolve"* ]]; then
+        [ "$is_debug" = true ] && echo "[LOG: SKIP] Skipping No_Resolve variant: $file_full_name"
+        continue
+    fi
 
-	# 【处理逻辑】
-	# 将带下划线的文件名去除下划线 (例如 A_1 转换为 A1)
-	if [[ "$name" == *"_"* ]]; then
-		name="${name//_/}"
-		[ "$is_debug" = true ] && echo "[LOG: RENAME] Variant detected: $file_full_name -> processing as $name"
-	fi
+    # 【处理逻辑】
+    # 将带下划线的文件名去除下划线 (例如 A_1 转换为 A1)
+    if [[ "$name" == *"_"* ]]; then
+        name="${name//_/}"
+        [ "$is_debug" = true ] && echo "[LOG: RENAME] Variant detected: $file_full_name -> processing as $name"
+    fi
 
-	# 忽略非规则文件
-	[[ "$name" == "config" ]] && continue
+    # 忽略非规则文件
+    [[ "$name" == "config" ]] && continue
 
-	[ "$is_debug" = true ] && echo -e "\n--- DEBUG START: $name ---"
+    [ "$is_debug" = true ] && echo -e "\n--- DEBUG START: $name ---"
 
-	mkdir -p "tmp_work/$name"
+    mkdir -p "tmp_work/$name"
 
-	# 【精准提取函数】
-	extract_final() {
-		local key=$1
-		local file_out="tmp_work/$name/$2.txt"
+    # 【精准提取函数】
+    extract_final() {
+        local key=$1
+        local file_out="tmp_work/$name/$2.txt"
 
-		# 逻辑：匹配行首 -> 排除注释行 -> 删缩进 -> 删空格 -> 切分取值 -> 删行尾注释
-		grep -iE "^[[:space:]]*- $key([[:space:]]*,|$)" "$yaml_file" |
-			grep -v '^[[:space:]]*#' |
-			sed 's/^[[:space:]-]*//' |
-			sed 's/[[:space:]]//g' |
-			cut -d',' -f2 | cut -d',' -f1 | cut -d'#' -f1 |
-			sort -u | sed '/^$/d' >"$file_out"
-	}
+        # 逻辑：匹配行首 -> 排除注释行 -> 删缩进 -> 删空格 -> 切分取值 -> 删行尾注释
+        grep -iE "^[[:space:]]*- $key([[:space:]]*,|$)" "$yaml_file" |
+            grep -v '^[[:space:]]*#' |
+            sed 's/^[[:space:]-]*//' |
+            sed 's/[[:space:]]//g' |
+            cut -d',' -f2 | cut -d',' -f1 | cut -d'#' -f1 |
+            sort -u | sed '/^$/d' >"$file_out"
+    }
 
-	extract_final "DOMAIN-SUFFIX" "suffix"
-	extract_final "DOMAIN" "domain"
-	extract_final "DOMAIN-KEYWORD" "keyword"
-	extract_final "IP-CIDR|IP-CIDR6" "ipcidr"
+    extract_final "DOMAIN-SUFFIX" "suffix"
+    extract_final "DOMAIN" "domain"
+    extract_final "DOMAIN-KEYWORD" "keyword"
+    extract_final "IP-CIDR|IP-CIDR6" "ipcidr"
 
-	# 【JSON & SRS 构建】
-	build_json() {
-		local mode=$1
-		local out_name=$2
-		local fields=()
-		gen_box() {
-			if [ -s "tmp_work/$name/$1.txt" ]; then
-				local items=$(cat "tmp_work/$name/$1.txt" | sed 's/.*/"&"/' | paste -sd, -)
-				echo "\"$2\":[$items]"
-			fi
-		}
+    # 【JSON & SRS 构建】
+    build_json() {
+        local mode=$1
+        local out_name=$2
+        local fields=()
+        gen_box() {
+            if [ -s "tmp_work/$name/$1.txt" ]; then
+                local items=$(cat "tmp_work/$name/$1.txt" | sed 's/.*/"&"/' | paste -sd, -)
+                echo "\"$2\":[$items]"
+            fi
+        }
 
-		s=$(gen_box "suffix" "domain_suffix")
-		[ -n "$s" ] && fields+=("$s")
-		d=$(gen_box "domain" "domain")
-		[ -n "$d" ] && fields+=("$d")
-		k=$(gen_box "keyword" "domain_keyword")
-		[ -n "$k" ] && fields+=("$k")
-		[ "$mode" == "all" ] && {
-			i=$(gen_box "ipcidr" "ip_cidr")
-			[ -n "$i" ] && fields+=("$i")
-		}
+        s=$(gen_box "suffix" "domain_suffix")
+        [ -n "$s" ] && fields+=("$s")
+        d=$(gen_box "domain" "domain")
+        [ -n "$d" ] && fields+=("$d")
+        k=$(gen_box "keyword" "domain_keyword")
+        [ -n "$k" ] && fields+=("$k")
+        [ "$mode" == "all" ] && {
+            i=$(gen_box "ipcidr" "ip_cidr")
+            [ -n "$i" ] && fields+=("$i")
+        }
 
-		if [ ${#fields[@]} -gt 0 ]; then
-			# 钉死 version: 2
-			echo -n '{"version":2,"rules":[{' >"$out_name"
-			(
-				IFS=,
-				echo -n "${fields[*]}"
-			) >>"$out_name"
-			echo '}]}' >>"$out_name"
+        if [ ${#fields[@]} -gt 0 ]; then
+            # 钉死 version: 4 (注意：你上一版本代码这里改成了 version:4，我保留了你的更改)
+            echo -n '{"version":4,"rules":[{' >"$out_name"
+            (
+                IFS=,
+                echo -n "${fields[*]}"
+            ) >>"$out_name"
+            echo '}]}' >>"$out_name"
 
-			./sing-box rule-set compile "$out_name" -o "${out_name%.json}.srs" &>/dev/null
-			return 0
-		fi
-		return 1
-	}
+            ./sing-box rule-set compile "$out_name" -o "${out_name%.json}.srs" &>/dev/null
+            return 0
+        fi
+        return 1
+    }
 
-	if build_json "all" "${name}.json"; then
-		[ "$is_debug" = true ] && echo "[RESULT] $name: SUCCESS."
-		build_json "resolve" "${name}-Resolve.json" &>/dev/null
-	fi
+    if build_json "all" "${name}.json"; then
+        [ "$is_debug" = true ] && echo "[RESULT] $name: SUCCESS."
+        build_json "resolve" "${name}-Resolve.json" &>/dev/null
+    fi
 
-	[ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
+    [ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
 done
+
+# --- 4.5 特殊规则处理 (AdGuard) ---
+[ "$is_debug" = true ] && echo "[INFO] Processing AdGuard special rule..."
+wget -q -O adg.txt https://raw.githubusercontent.com/ppfeufer/adguard-filter-list/refs/heads/master/blocklist
+if [ -f "adg.txt" ]; then
+    ./sing-box rule-set convert --type adguard --output adg.srs adg.txt &>/dev/null
+    [ "$is_debug" = true ] && echo "[RESULT] adg.srs: SUCCESS."
+fi
 
 # --- 5. 结尾清理 ---
 if [ "$is_debug" = false ]; then
-	rm -rf tmp_work 2>/dev/null
-	[ "$is_debug" = false ] && echo "[INFO] Run complete. Cleanup finished."
+    rm -rf tmp_work 2>/dev/null
+    rm -f adg.txt 2>/dev/null # 增加：清理下载的 adguard 文本规则
+    [ "$is_debug" = false ] && echo "[INFO] Run complete. Cleanup finished."
 else
-	echo "[INFO] Debug mode on. tmp_work preserved."
+    echo "[INFO] Debug mode on. tmp_work and adg.txt preserved."
 fi
 
 echo "------------------------------------------------"

@@ -271,6 +271,7 @@ jobs:
           wget https://raw.githubusercontent.com/xishang0128/geoip/release/GeoLite2-ASN.mmdb
           go run ./ asn -o ../meta-rule/asn
           go run ./ asn -o ../sing-rule/asn -t sing-box
+          
       - name: Convert bm7-rule-set to sing-rule-set
         env:
           NO_SKIP: true
