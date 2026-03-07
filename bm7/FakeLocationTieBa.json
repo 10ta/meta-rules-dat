@@ -1,0 +1,1 @@
+{"version":4,"rules":[{"domain_suffix":["httpdns.baidu.com","httpdns.baidubce.com"],"domain":["tiebac.baidu.com"],"ip_cidr":["180.76.76.0/24"]}]}
