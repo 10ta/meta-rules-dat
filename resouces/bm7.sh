@@ -98,7 +98,7 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
         }
 
         if [ ${#fields[@]} -gt 0 ]; then
-            # 钉死 version: 4 (注意：你上一版本代码这里改成了 version:4，我保留了你的更改)
+            # 钉死 version: 4
             echo -n '{"version":4,"rules":[{' >"$out_name"
             (
                 IFS=,
@@ -120,10 +120,13 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
     [ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
 done
 
-# --- 4.5 特殊规则处理 (AdGuard) ---
+# --- 4.5 特殊规则处理 (AdGuard + Turtlecute) ---
 [ "$is_debug" = true ] && echo "[INFO] Processing AdGuard special rule..."
 wget -q -O adg.txt https://raw.githubusercontent.com/ppfeufer/adguard-filter-list/refs/heads/master/blocklist
+wget -q -O turtle.txt https://raw.githubusercontent.com/Turtlecute33/Toolz/master/src/d3host.adblock
 if [ -f "adg.txt" ]; then
+    # 将 Turtlecute 列表合并到 adg.txt
+    [ -f "turtle.txt" ] && cat turtle.txt >> adg.txt
     ./sing-box rule-set convert --type adguard --output adg.srs adg.txt &>/dev/null
     [ "$is_debug" = true ] && echo "[RESULT] adg.srs: SUCCESS."
 fi
@@ -131,10 +134,10 @@ fi
 # --- 5. 结尾清理 ---
 if [ "$is_debug" = false ]; then
     rm -rf tmp_work 2>/dev/null
-    rm -f adg.txt 2>/dev/null # 增加：清理下载的 adguard 文本规则
-    [ "$is_debug" = false ] && echo "[INFO] Run complete. Cleanup finished."
+    rm -f adg.txt turtle.txt 2>/dev/null
+    echo "[INFO] Run complete. Cleanup finished."
 else
-    echo "[INFO] Debug mode on. tmp_work and adg.txt preserved."
+    echo "[INFO] Debug mode on. tmp_work, adg.txt and turtle.txt preserved."
 fi
 
 echo "------------------------------------------------"
