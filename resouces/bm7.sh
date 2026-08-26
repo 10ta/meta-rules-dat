@@ -120,13 +120,22 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
     [ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
 done
 
-# --- 4.5 特殊规则处理 (AdGuard + Turtlecute) ---
+# --- 4.5 特殊规则处理 (AdGuard + Turtlecute + AWAvenue) ---
 [ "$is_debug" = true ] && echo "[INFO] Processing AdGuard special rule..."
 wget -q -O adg.txt https://raw.githubusercontent.com/ppfeufer/adguard-filter-list/refs/heads/master/blocklist
 wget -q -O turtle.txt https://raw.githubusercontent.com/Turtlecute33/Toolz/master/src/d3host.adblock
+wget -q -O awavenue.txt https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/AWAvenue-Ads-Rule.txt
+
 if [ -f "adg.txt" ]; then
-    # 将 Turtlecute 列表合并到 adg.txt
-    [ -f "turtle.txt" ] && cat turtle.txt >> adg.txt
+    # 将 Turtlecute 与 AWAvenue 列表合并到 adg.txt，并去重（保留原始顺序,空行剔除）
+    tmp_merge="adg_merge.tmp"
+    cat adg.txt \
+        $( [ -f "turtle.txt" ] && echo "turtle.txt" ) \
+        $( [ -f "awavenue.txt" ] && echo "awavenue.txt" ) \
+        | sed '/^[[:space:]]*$/d' \
+        | awk '!seen[$0]++' >"$tmp_merge"
+    mv -f "$tmp_merge" adg.txt
+
     ./sing-box rule-set convert --type adguard --output adg.srs adg.txt &>/dev/null
     [ "$is_debug" = true ] && echo "[RESULT] adg.srs: SUCCESS."
 fi
