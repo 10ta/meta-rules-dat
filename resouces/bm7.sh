@@ -140,6 +140,17 @@ if [ -f "adg.txt" ]; then
     [ "$is_debug" = true ] && echo "[RESULT] adg.srs: SUCCESS."
 fi
 
+# --- 4.6 Claude 规则追加 claude.com ---
+[ "$is_debug" = true ] && echo "[INFO] Patching Claude rule with claude.com..."
+for f in Claude.json Claude-Resolve.json; do
+    if [ -f "$f" ]; then
+        jq -c '.rules[0].domain_suffix = ((.rules[0].domain_suffix // []) + (["claude.com"] - (.rules[0].domain_suffix // [])))' "$f" > "${f}.tmp" \
+            && mv -f "${f}.tmp" "$f"
+        ./sing-box rule-set compile "$f" -o "${f%.json}.srs" &>/dev/null
+        [ "$is_debug" = true ] && echo "[RESULT] $f patched and recompiled."
+    fi
+done
+
 # --- 5. 结尾清理 ---
 if [ "$is_debug" = false ]; then
     rm -rf tmp_work 2>/dev/null
