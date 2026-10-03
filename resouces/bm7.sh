@@ -117,7 +117,7 @@ find ./rule/Clash -type f -name "*.yaml" | while read yaml_file; do
         build_json "resolve" "${name}-Resolve.json" &>/dev/null
     fi
 
-    [ "$is_debug" = true ] && echo "--- DEBUG END: $name ---"
+    [ "$is_debug" = true ] && echo "[INFO] --- DEBUG END: $name ---"
 done
 
 # --- 4.5 特殊规则处理 (AdGuard + Turtlecute + AWAvenue) ---
@@ -151,10 +151,91 @@ for f in Claude.json Claude-Resolve.json; do
     fi
 done
 
+# --- 4.7 Telegram 分区域 IP 规则合并 (SG / US / EU->NL) ---
+# 规则：自定义列表与现有 TelegramSG / TelegramUS / TelegramNL 合并；
+#       若同一 CIDR 在自定义列表中归属某区域，则从其他区域的现有规则里剔除（以自定义为准）。
+[ "$is_debug" = true ] && echo "[INFO] Merging Telegram regional IP rules..."
+
+# 以下三段即 sing-box 规则集源文件格式，可直接复制为 inline rule-set（取其中 rules 部分）或保存为 .json
+TG_SG_RS='{
+  "version": 4,
+  "rules": [
+    {
+      "ip_cidr": [
+        "91.108.16.0/22",
+        "91.108.20.0/22",
+        "91.108.56.0/23",
+        "149.154.168.0/22",
+        "2001:b28:f23c::/48",
+        "2001:b28:f23f::/48"
+      ]
+    }
+  ]
+}'
+
+TG_US_RS='{
+  "version": 4,
+  "rules": [
+    {
+      "ip_cidr": [
+        "91.108.12.0/22",
+        "149.154.172.0/22",
+        "2001:b28:f23d::/48"
+      ]
+    }
+  ]
+}'
+
+TG_EU_RS='{
+  "version": 4,
+  "rules": [
+    {
+      "ip_cidr": [
+        "91.105.192.0/23",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.58.0/23",
+        "95.161.64.0/20",
+        "149.154.160.0/21",
+        "185.76.151.0/24",
+        "2001:67c:4e8::/48",
+        "2a0a:f280:203::/48"
+      ]
+    }
+  ]
+}'
+
+# 所有自定义 CIDR 的并集（用于冲突剔除）
+ALL_JSON=$(jq -c -n --argjson a "$TG_SG_RS" --argjson b "$TG_US_RS" --argjson c "$TG_EU_RS" \
+    '[$a,$b,$c] | map(.rules[0].ip_cidr) | add')
+
+# merge_tg <目标规则名> <自有规则集JSON>
+merge_tg() {
+    local target=$1
+    local own
+    own=$(jq -c '.rules[0].ip_cidr' <<<"$2")
+    local f="${target}.json"
+
+    if [ -f "$f" ]; then
+        jq -c --argjson own "$own" --argjson all "$ALL_JSON" '
+            .rules[0].ip_cidr = ((((.rules[0].ip_cidr // []) - $all) + $own) | unique)
+        ' "$f" >"${f}.tmp" && mv -f "${f}.tmp" "$f"
+    else
+        jq -c . <<<"$2" >"$f"
+    fi
+
+    ./sing-box rule-set compile "$f" -o "${f%.json}.srs" &>/dev/null
+    [ "$is_debug" = true ] && echo "[RESULT] $f merged and recompiled."
+}
+
+merge_tg "TelegramSG" "$TG_SG_RS"
+merge_tg "TelegramUS" "$TG_US_RS"
+merge_tg "TelegramNL" "$TG_EU_RS"
+
 # --- 5. 结尾清理 ---
 if [ "$is_debug" = false ]; then
     rm -rf tmp_work 2>/dev/null
-    rm -f adg.txt turtle.txt 2>/dev/null
+    rm -f adg.txt turtle.txt awavenue.txt 2>/dev/null
     echo "[INFO] Run complete. Cleanup finished."
 else
     echo "[INFO] Debug mode on. tmp_work, adg.txt and turtle.txt preserved."
