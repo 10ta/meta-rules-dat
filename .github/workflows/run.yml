@@ -1,6 +1,11 @@
 name: Build rules dat files
 on:
   workflow_dispatch:
+    inputs:
+      sb_version:
+        description: "sing-box 版本号（如 1.14.0），留空 = 最新正式版"
+        required: false
+        default: ""
   schedule:
     - cron: "30 22 * * *" # 6:30 AM UTC+8
   push:
@@ -8,14 +13,42 @@ on:
       - master
     paths-ignore:
       - "**/README.md"
+
+permissions:
+  contents: write
+
+# 定时 / push / 手动触发可能同时发生，避免互相 force-push；不取消正在运行的，避免发布到一半被打断
+concurrency:
+  group: build-rules-dat
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Set variables
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SB_VERSION: ${{ inputs.sb_version }}
         run: |
+          # sing-box 版本：手动输入 > 最新正式版(API) > 最新正式版(重定向) > 兜底 1.14.0
+          SB_FALLBACK=1.14.0
+          SB_VERSION="${INPUT_SB_VERSION#v}"
+          if [ -z "$SB_VERSION" ]; then
+            SB_VERSION=$(gh release view --repo SagerNet/sing-box --json tagName -q '.tagName | ltrimstr("v")' 2>/dev/null || true)
+          fi
+          if [ -z "$SB_VERSION" ]; then
+            loc=$(curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/SagerNet/sing-box/releases/latest 2>/dev/null || true)
+            SB_VERSION="${loc##*/v}"
+          fi
+          if ! [[ "$SB_VERSION" =~ ^[0-9]+(\.[0-9]+)+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::warning::无法确定 sing-box 最新版本（得到 '${SB_VERSION}'），回退到 ${SB_FALLBACK}"
+            SB_VERSION="$SB_FALLBACK"
+          fi
+          echo "sing-box version: ${SB_VERSION}"
+          echo "SB_VERSION=${SB_VERSION}" >> $GITHUB_ENV
           echo "GOAMD64=v3" >> $GITHUB_ENV
-          echo "SB_VERSION=1.14.0" >> $GITHUB_ENV
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
           echo "CHINA_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/ChinaMax/ChinaMax_Domain.txt" >> $GITHUB_ENV
           echo "GOOGLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/google.china.conf" >> $GITHUB_ENV
@@ -27,10 +60,26 @@ jobs:
           echo "WIN_EXTRA=https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/extra.txt" >> $GITHUB_ENV
         shell: bash
 
+      # 之后所有 curl 默认：HTTP 4xx/5xx 视为失败 + 自动重试，避免把错误页当数据写进列表
+      - name: Configure curl
+        run: |
+          cat > ~/.curlrc <<'EOF'
+          fail
+          retry = 3
+          retry-all-errors
+          connect-timeout = 10
+          EOF
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           repository: MetaCubeX/meta-rules-dat
+
+      # 本仓库：取 bm7.sh，保证与本次运行的提交一致（raw 地址有缓存且不随提交固定）
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: self
 
       - name: Checkout Loyalsoldier/domain-list-custom
         uses: actions/checkout@v4
@@ -60,12 +109,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-          cache-dependency-path: ./custom/go.sum
-
-      - name: Get geoip.dat relative files
-        run: |
-          wget https://github.com/Loyalsoldier/geoip/raw/release/geoip.dat
-          wget https://github.com/Loyalsoldier/geoip/raw/release/geoip.dat.sha256sum
+          cache-dependency-path: |
+            ./custom/go.sum
+            ./community/go.sum
+            ./convert/go.sum
 
       - name: Generate GFWList domains
         run: |
@@ -75,11 +122,13 @@ jobs:
 
       - name: Get and add direct domains into temp-direct.txt file
         run: |
-          curl -sSL ${CHINA_DOMAINS_URL} | sed '/^\s*#/d' | sed '/^[^\.]/ s/^/full:/' |  sed 's/^\.\([^.]*\)/\1/' > temp-direct.txt 
+          set -o pipefail
+          curl -sSL ${CHINA_DOMAINS_URL} | sed '/^\s*#/d' | sed '/^[^\.]/ s/^/full:/' |  sed 's/^\.\([^.]*\)/\1/' > temp-direct.txt
           # curl -sSL ${CUSTOM_DIRECT} | perl -ne '/^(domain):([^:]+)(\n$|:@.+)/ && print "$2\n"' >> temp-direct.txt
 
       - name: Get and add proxy domains into temp-proxy.txt file
         run: |
+          set -o pipefail
           cat ./gfwlist2dnsmasq/temp-gfwlist.txt | perl -ne '/^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/ && print "$1\n"' > temp-proxy.txt
           curl -sSL $GOOGLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' >> temp-proxy.txt
           curl -sSL $APPLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' >> temp-proxy.txt
@@ -87,9 +136,10 @@ jobs:
 
       - name: Reserve `full`, `regexp` and `keyword` type of rules from custom lists to "reserve" files
         run: |
+          set -o pipefail
           # curl -sSL ${CUSTOM_DIRECT} | grep -v google | grep -v manhua | grep -v ooklaserver | grep -v "acg.rip" | perl -ne '/^((full|regexp|keyword):[^:]+)(\n$|:@.+)/ && print "$1\n"' | sort --ignore-case -u > direct-reserve.txt
           curl -sSL ${CUSTOM_PROXY} | grep -Ev ":@cn" | perl -ne '/^((full|regexp|keyword):[^:]+)(\n$|:@.+)/ && print "$1\n"' | sort --ignore-case -u > proxy-reserve.txt
-          
+
       - name: Add proxy, direct and reject domains from "hidden" branch to appropriate temp files
         run: |
           cat ./resouces/proxy.txt >> temp-proxy.txt
@@ -135,6 +185,7 @@ jobs:
 
       - name: Create `google-cn`、`apple-cn`、`gfw` lists
         run: |
+          set -o pipefail
           curl -sSL $GOOGLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "full:$1\n"' > ./community/data/google-cn
           curl -sSL $APPLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "full:$1\n"' > ./community/data/apple-cn
           cat ./gfwlist2dnsmasq/temp-gfwlist.txt | perl -ne '/^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/ && print "$1\n"' >> ./community/data/gfw
@@ -146,6 +197,7 @@ jobs:
         env:
           SED: sed '/^\s*#/d' | sed 's/DOMAIN,//g' | sed 's/DOMAIN-SUFFIX,//g' | sed 's/DOMAIN-KEYWORD,/keyword:/g'
         run: |
+          set -o pipefail
           curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/SteamCN/SteamCN.list | ${{ env.SED }} > steamcn.txt
           while read line; do grep -q "$line @cn" ./community/data/steam || sed -i "/$line/ s/$/ @cn/" ./community/data/steam; done < steamcn.txt
           cat ./community/data/steam
@@ -154,12 +206,19 @@ jobs:
         env:
           SED: sed '/^\s*#/d' | sed 's/^PROCESS-NAME,//' | sed 's/DOMAIN,/full:/g' | sed 's/DOMAIN-SUFFIX,//g' | sed 's/DOMAIN-KEYWORD,/keyword:/g' | sed '/^\s*IP-CIDR/d'
         run: |
+          set -o pipefail
           curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list > ./community/data/biliintl
           curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/OneDrive/OneDrive.list | ${{ env.SED }} > ./community/data/onedrive
-          echo "sharepoint.cn" >> ./community/data/onedrive 
+          echo "sharepoint.cn" >> ./community/data/onedrive
           curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/sharepoint.list > ./community/data/sharepoint
           curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/PrivateTracker/PrivateTracker.list | ${{ env.SED }} > ./community/data/tracker
-          curl -sSL https://gitea.com/XIU2/TrackersListCollection/raw/branch/master/all.txt | grep -i "\.[A-Z]" | grep -v tracker | sed 's/^.*\/\///g' | sed 's/:.*\/.*//g' >> ./community/data/tracker
+          # gitea.com 偶尔不稳定，这份 tracker 列表是附加项：失败只告警，不让整个构建失败
+          if curl -sSL -o trackers-all.tmp https://gitea.com/XIU2/TrackersListCollection/raw/branch/master/all.txt; then
+            { grep -i "\.[A-Z]" trackers-all.tmp | grep -v tracker | sed 's/^.*\/\///g' | sed 's/:.*\/.*//g' >> ./community/data/tracker; } || true
+          else
+            echo "::warning::下载 XIU2/TrackersListCollection 失败，本次不追加 tracker 列表"
+          fi
+          rm -f trackers-all.tmp
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BlockHttpDNS/BlockHttpDNS.list | ${{ env.SED }} > ./community/data/httpdns
 
       - name: Build geosite.dat file
@@ -176,32 +235,55 @@ jobs:
         run: |
           cd community || exit 1
           mkdir -p data-lite
-          curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list > ./data-lite/biliintl
-          curl -sSL https://github.com/v2fly/domain-list-community/raw/master/data/ehentai > ./data-lite/ehentai
-          curl -sSL https://github.com/v2fly/domain-list-community/raw/master/data/private > ./data-lite/private
+          BM7=https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash
+          fail_flag="${RUNNER_TEMP}/lite_failed"
+          rm -f "$fail_flag"
 
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AbemaTV/AbemaTV.yaml | ${{ env.SED }} > ./data-lite/abema
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Apple/Apple_Classical.yaml | ${{ env.SED }} > ./data-lite/apple
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AppleMusic/AppleMusic.yaml | ${{ env.SED }} > ./data-lite/applemusic
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BiliBili/BiliBili.yaml | ${{ env.SED }} > ./data-lite/bilibili
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Bahamut/Bahamut.yaml | ${{ env.SED }} > ./data-lite/bahamut
+          # 先下载到临时文件（curl 失败即报错），再按原样用 SED 转换；转换结果为空不算失败（与原行为一致）
+          plain() { curl -sSL -o "./data-lite/$2" "$1"; }
+          conv() { curl -sSL -o "${RUNNER_TEMP}/$2.raw" "$1" && eval "$SED" < "${RUNNER_TEMP}/$2.raw" > "./data-lite/$2"; }
+          china() {
+            curl -sSL -o "${RUNNER_TEMP}/cn.raw" https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/China/China_Domain.yaml &&
+              grep - "${RUNNER_TEMP}/cn.raw" | sed "s/  - '+.//g" | sed "s/  - '/full:/g" | grep -v "#" | grep -v "acg.rip" | sed "s/'//g" > ./data-lite/cn
+          }
+          # 最多同时 8 个下载
+          bg() {
+            while [ "$(jobs -rp | wc -l)" -ge 8 ]; do wait -n; done
+            ( "$@" || { echo "download failed: $*"; touch "$fail_flag"; } ) &
+          }
 
-          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/China/China_Domain.yaml | grep - | sed "s/  - '+.//g" | sed "s/  - '/full:/g" | grep -v "#" | grep -v "acg.rip" | sed "s/'//g" > ./data-lite/cn
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Cloudflare/Cloudflare.yaml | ${{ env.SED }} > ./data-lite/cloudflare
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Google/Google.yaml | ${{ env.SED }} > ./data-lite/google
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GitHub/GitHub.yaml | ${{ env.SED }} > ./data-lite/github
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Microsoft/Microsoft.yaml | ${{ env.SED }} > ./data-lite/microsoft
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Netflix/Netflix.yaml | ${{ env.SED }} > ./data-lite/netflix
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OpenAI/OpenAI.yaml | ${{ env.SED }} > ./data-lite/openai
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OneDrive/OneDrive.yaml | ${{ env.SED }} > ./data-lite/onedrive
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Pixiv/Pixiv.yaml | ${{ env.SED }} > ./data-lite/pixiv
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/ProxyLite/ProxyLite.yaml | ${{ env.SED }} > ./data-lite/proxy
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Spotify/Spotify.yaml | ${{ env.SED }} > ./data-lite/spotify
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Telegram/Telegram.yaml | ${{ env.SED }} > ./data-lite/telegram
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Twitter/Twitter.yaml | ${{ env.SED }} > ./data-lite/twitter
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/TikTok/TikTok.yaml | ${{ env.SED }} > ./data-lite/tiktok
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/YouTube/YouTube.yaml | ${{ env.SED }} > ./data-lite/youtube
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GlobalMedia/GlobalMedia.yaml | ${{ env.SED }} > ./data-lite/proxymedia
+          bg plain https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list biliintl
+          bg plain https://github.com/v2fly/domain-list-community/raw/master/data/ehentai ehentai
+          bg plain https://github.com/v2fly/domain-list-community/raw/master/data/private private
+
+          bg conv "$BM7/AbemaTV/AbemaTV.yaml" abema
+          bg conv "$BM7/Apple/Apple_Classical.yaml" apple
+          bg conv "$BM7/AppleMusic/AppleMusic.yaml" applemusic
+          bg conv "$BM7/BiliBili/BiliBili.yaml" bilibili
+          bg conv "$BM7/Bahamut/Bahamut.yaml" bahamut
+
+          bg china
+          bg conv "$BM7/Cloudflare/Cloudflare.yaml" cloudflare
+          bg conv "$BM7/Google/Google.yaml" google
+          bg conv "$BM7/GitHub/GitHub.yaml" github
+          bg conv "$BM7/Microsoft/Microsoft.yaml" microsoft
+          bg conv "$BM7/Netflix/Netflix.yaml" netflix
+          bg conv "$BM7/OpenAI/OpenAI.yaml" openai
+          bg conv "$BM7/OneDrive/OneDrive.yaml" onedrive
+          bg conv "$BM7/Pixiv/Pixiv.yaml" pixiv
+          bg conv "$BM7/ProxyLite/ProxyLite.yaml" proxy
+          bg conv "$BM7/Spotify/Spotify.yaml" spotify
+          bg conv "$BM7/Telegram/Telegram.yaml" telegram
+          bg conv "$BM7/Twitter/Twitter.yaml" twitter
+          bg conv "$BM7/TikTok/TikTok.yaml" tiktok
+          bg conv "$BM7/YouTube/YouTube.yaml" youtube
+          bg conv "$BM7/GlobalMedia/GlobalMedia.yaml" proxymedia
+
+          wait
+          if [ -e "$fail_flag" ]; then
+            echo "::error::geosite-lite 的数据下载失败，见上方 'download failed' 日志"
+            exit 1
+          fi
 
           echo include:google >> ./data-lite/proxy && echo include:github >> ./data-lite/proxy && echo include:netflix >> ./data-lite/proxy
           echo ipleak.net >> ./data-lite/proxy && echo browserleaks.org >> ./data-lite/proxy
@@ -211,8 +293,8 @@ jobs:
 
       - name: Get geoip.dat relative files
         run: |
-          wget -O geoip-lite.dat https://github.com/xishang0128/geoip/raw/release/geoip.dat
-          wget https://github.com/Loyalsoldier/geoip/raw/release/geoip.dat
+          curl -sSL -o geoip-lite.dat https://github.com/xishang0128/geoip/raw/release/geoip.dat
+          curl -sSL -o geoip.dat https://github.com/Loyalsoldier/geoip/raw/release/geoip.dat
 
       - name: Build db and metadb file
         env:
@@ -226,71 +308,70 @@ jobs:
           geo convert ip -i v2ray -o sing -f geoip-lite.db ./geoip-lite.dat
           geo convert ip -i v2ray -o meta -f geoip-lite.metadb ./geoip-lite.dat
 
-      - name: Convert geo to sing-rule-set
+      # 原先的 4 个 geo 转换步骤 + asn 步骤合并：转换器只编译一次，不再每次 go run 重新编译链接
+      - name: Convert geo, geo-lite and asn to sing-rule-set / meta-rule-set
         env:
           NO_SKIP: true
         run: |
           mkdir -p sing-rule/geo/geosite && mkdir -p sing-rule/geo/geoip
-          cd convert
-          go run ./ geosite -f ../custom/publish/geosite.dat -o ../sing-rule/geo/geosite -t sing-box
-          go run ./ geoip -f ../geoip.dat -o ../sing-rule/geo/geoip -t sing-box
-
-      - name: Convert geo-lite to sing-rule-set
-        env:
-          NO_SKIP: true
-        run: |
           mkdir -p sing-rule/geo-lite/geosite && mkdir -p sing-rule/geo-lite/geoip
-          cd convert
-          go run ./ geosite -f ../community/geosite-lite.dat -o ../sing-rule/geo-lite/geosite -t sing-box
-          go run ./ geoip -f ../geoip-lite.dat -o ../sing-rule/geo-lite/geoip -t sing-box
-
-      - name: Convert geo to meta-rule-set
-        env:
-          NO_SKIP: true
-        run: |
           mkdir -p meta-rule/geo/geosite && mkdir -p meta-rule/geo/geoip
-          cd convert
-          go run ./ geosite -f ../custom/publish/geosite.dat -o ../meta-rule/geo/geosite
-          go run ./ geoip -f ../geoip.dat -o ../meta-rule/geo/geoip
-
-      - name: Convert geo-lite to meta-rule-set
-        env:
-          NO_SKIP: true
-        run: |
           mkdir -p meta-rule/geo-lite/geosite && mkdir -p meta-rule/geo-lite/geoip
-          cd convert
-          go run ./ geosite -f ../community/geosite-lite.dat -o ../meta-rule/geo-lite/geosite
-          go run ./ geoip -f ../geoip-lite.dat -o ../meta-rule/geo-lite/geoip
-
-      - name: Convert asn
-        env:
-          NO_SKIP: true
-        run: |
           mkdir -p meta-rule/asn && mkdir -p sing-rule/asn
           cd convert
-          wget https://raw.githubusercontent.com/xishang0128/geoip/release/GeoLite2-ASN.mmdb
-          go run ./ asn -o ../meta-rule/asn
-          go run ./ asn -o ../sing-rule/asn -t sing-box
+          go build -o ../rule-converter ./
+          CONV=../rule-converter
+
+          # geo -> sing-rule-set
+          $CONV geosite -f ../custom/publish/geosite.dat -o ../sing-rule/geo/geosite -t sing-box
+          $CONV geoip -f ../geoip.dat -o ../sing-rule/geo/geoip -t sing-box
+          # geo-lite -> sing-rule-set
+          $CONV geosite -f ../community/geosite-lite.dat -o ../sing-rule/geo-lite/geosite -t sing-box
+          $CONV geoip -f ../geoip-lite.dat -o ../sing-rule/geo-lite/geoip -t sing-box
+          # geo -> meta-rule-set
+          $CONV geosite -f ../custom/publish/geosite.dat -o ../meta-rule/geo/geosite
+          $CONV geoip -f ../geoip.dat -o ../meta-rule/geo/geoip
+          # geo-lite -> meta-rule-set
+          $CONV geosite -f ../community/geosite-lite.dat -o ../meta-rule/geo-lite/geosite
+          $CONV geoip -f ../geoip-lite.dat -o ../meta-rule/geo-lite/geoip
+          # asn
+          curl -sSL -O https://raw.githubusercontent.com/xishang0128/geoip/release/GeoLite2-ASN.mmdb
+          $CONV asn -o ../meta-rule/asn
+          $CONV asn -o ../sing-rule/asn -t sing-box
 
       - name: Convert bm7-rule-set to sing-rule-set
         env:
           NO_SKIP: true
         run: |
           mkdir -p ./sing-rule/bm7
-          # cp ./resouces/bm7.sh ./sing-rule/bm7/
+          cp ./self/resouces/bm7.sh ./sing-rule/bm7/bm7.sh
           cd ./sing-rule/bm7
-          wget https://raw.githubusercontent.com/10ta/meta-rules-dat/master/resouces/bm7.sh
-          wget https://github.com/SagerNet/sing-box/releases/download/v${{ env.SB_VERSION }}/sing-box-${{ env.SB_VERSION }}-linux-amd64.tar.gz -O sing-box.tar.gz && tar zxvf sing-box.tar.gz && mv sing-box-${{ env.SB_VERSION }}-linux-amd64/sing-box ./ && rm -r sing-box-${{ env.SB_VERSION }}-linux-amd64
-          ls
+
+          # 下载 sing-box；官方压缩包目录名若变化，用 find 定位二进制
+          ok=0
+          for suffix in "" "-glibc"; do
+            url="https://github.com/SagerNet/sing-box/releases/download/v${SB_VERSION}/sing-box-${SB_VERSION}-linux-amd64${suffix}.tar.gz"
+            if curl -sSL -o sing-box.tar.gz "$url"; then ok=1; break; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::下载 sing-box v${SB_VERSION} 失败"
+            exit 1
+          fi
+          mkdir sb-extract && tar zxf sing-box.tar.gz -C sb-extract
+          mv "$(find sb-extract -type f -name sing-box | head -n 1)" ./sing-box
+          rm -rf sb-extract sing-box.tar.gz
+          chmod +x ./sing-box
+          ./sing-box version
+
           chmod 755 bm7.sh && ./bm7.sh
           rm -r bm7.sh sing-box* rule
 
       - name: Move and zip files
         run: |
           mkdir -p ./publish/
-          wget https://raw.githubusercontent.com/xishang0128/geoip/release/Country.mmdb -O ./publish/country-lite.mmdb
-          wget https://raw.githubusercontent.com/Loyalsoldier/geoip/release/Country.mmdb -O ./publish/country.mmdb
-          wget https://raw.githubusercontent.com/xishang0128/geoip/release/GeoLite2-ASN.mmdb -O ./publish/GeoLite2-ASN.mmdb
+          curl -sSL -o ./publish/country-lite.mmdb https://raw.githubusercontent.com/xishang0128/geoip/release/Country.mmdb
+          curl -sSL -o ./publish/country.mmdb https://raw.githubusercontent.com/Loyalsoldier/geoip/release/Country.mmdb
+          cp ./convert/GeoLite2-ASN.mmdb ./publish/GeoLite2-ASN.mmdb
           install -Dp ./geoip-lite.dat ./publish/
           install -Dp ./geoip.dat ./publish/
           install -Dp ./custom/publish/geosite.dat ./publish/
@@ -316,12 +397,33 @@ jobs:
           sha256sum geoip-lite.metadb > geoip-lite.metadb.sha256sum
           sha256sum GeoLite2-ASN.mmdb > GeoLite2-ASN.mmdb.sha256sum
 
-      - name: Delete current release assets
-        uses: andreaswilli/delete-release-assets-action@v3.0.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: latest
-          deleteOnlyFromDrafts: false
+      # 发布前的体检：任何一项不通过就中止，保留上一次的 release 和各分支不被破坏
+      - name: Verify outputs before publishing
+        run: |
+          MIN_BYTES=10240      # 单个产物至少 10KB（错误页 / 空文件会被拦住）
+          MIN_LIST_LINES=1000  # direct / proxy 域名列表至少 1000 行
+          MIN_SRS=300          # bm7 规则集至少 300 个 .srs
+          MIN_GEO_FILES=100    # sing-rule / meta-rule 至少各 100 个文件
+          ok=1
+          for f in country.mmdb country-lite.mmdb GeoLite2-ASN.mmdb geoip-lite.dat geoip.dat geosite.dat geosite-lite.dat geosite.db geosite-lite.db geoip.db geoip-lite.db geoip.metadb geoip-lite.metadb; do
+            if [ ! -s "publish/$f" ] || [ ! -s "publish/$f.sha256sum" ]; then
+              echo "::error::缺少产物或校验文件: $f"; ok=0; continue
+            fi
+            sz=$(stat -c %s "publish/$f")
+            if [ "$sz" -lt "$MIN_BYTES" ]; then echo "::error::$f 只有 ${sz} 字节"; ok=0; fi
+          done
+          for f in direct-list.txt proxy-list.txt; do
+            n=$(wc -l < "$f")
+            if [ "$n" -lt "$MIN_LIST_LINES" ]; then echo "::error::$f 只有 ${n} 行"; ok=0; fi
+          done
+          n=$(find sing-rule/bm7 -name '*.srs' | wc -l)
+          if [ "$n" -lt "$MIN_SRS" ]; then echo "::error::sing-rule/bm7 只有 ${n} 个 .srs"; ok=0; fi
+          for d in sing-rule meta-rule; do
+            n=$(find "$d" -type f | wc -l)
+            if [ "$n" -lt "$MIN_GEO_FILES" ]; then echo "::error::$d 只有 ${n} 个文件"; ok=0; fi
+          done
+          [ "$ok" = 1 ] || exit 1
+          echo "all checks passed"
 
       - name: Create and Upload Release
         id: upload_release
@@ -334,48 +436,42 @@ jobs:
           overwrite: true
           file: ./publish/*
 
-      - name: Git push assets to "release" branch
+      # 原先在上传前清空 release，中间有一段空窗；现在先覆盖上传，再只删除不在本次产物里的旧文件
+      - name: Remove stale release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cd publish || exit 1
-          git init
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b release
-          git add .
-          git commit -m "Released on ${{ env.BUILDTIME }}"
-          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-          git push -f -u origin release
+          gh release view latest --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | while read -r name; do
+            if [ ! -e "publish/$name" ]; then
+              echo "delete stale asset: $name"
+              gh release delete-asset latest "$name" --repo "$GITHUB_REPOSITORY" -y
+            fi
+          done
 
-      - name: Git push assets to "sing-rule" branch
+      - name: Git push assets to release, sing and meta branches
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-            cd sing-rule || exit 1
-            ls
-            git init
-            git config --local user.name "github-actions[bot]"
-            git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git checkout -b sing
-            git add .
-            git commit -m "Released on ${{ env.BUILDTIME }}"
-            git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-            git push -f -u origin sing
-
-      - name: Git push assets to "meta-rule" branch
-        run: |
-            cd meta-rule || exit 1
-            ls
-            git init
-            git config --local user.name "github-actions[bot]"
-            git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git checkout -b meta
-            git add .
-            git commit -m "Released on ${{ env.BUILDTIME }}"
-            git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-            git push -f -u origin meta
-
+          push_branch() { # <目录> <分支>
+            (
+              cd "$1" || exit 1
+              git init
+              git config --local user.name "github-actions[bot]"
+              git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git checkout -b "$2"
+              git add .
+              git commit -m "Released on ${BUILDTIME}"
+              git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+              git push -f -u origin "$2"
+            )
+          }
+          push_branch publish release
+          push_branch sing-rule sing
+          push_branch meta-rule meta
 
       - name: Purge jsdelivr CDN
         run: |
           cd publish || exit 1
-          for file in $(ls); do
-            curl -i "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}"
+          for file in *; do
+            curl -i "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@release/${file}" || echo "::warning::purge failed: ${file}"
           done
